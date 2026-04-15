@@ -1,7 +1,8 @@
 # 剧本记忆层 PoC — 技术文档
 
 > 目标：用最少的代码验证「Graphiti + Neo4j + Qwen2.5」能否处理中文剧本场景。
-> 本文档覆盖 Stage 1（基座）和 Stage 2（本体 + 中文适配）。Stage 3（认知边界查询）尚未实施。
+> 本文档覆盖三个阶段全部：Stage 1（基座）、Stage 2（本体 + 中文适配）、
+> Stage 3（认知边界查询）。
 
 ---
 
@@ -32,7 +33,8 @@ src/screenplay_memory/
 │   ├── __init__.py
 │   ├── prompts.py            # CHINESE_EXTRACTION_INSTRUCTIONS + SCENE_HEADER_TEMPLATE
 │   └── coreference.py        # resolve_coreference(text, known_characters)
-└── queries/                  # Stage 3 (TODO)
+└── queries/                  # Stage 3
+    ├── __init__.py           # 暴露 query_character_knowledge
     └── cognitive.py
 ```
 
@@ -272,6 +274,11 @@ async def clear(self):
 | 2 | `test_02_ontology.py::test_ontology_extracts_plot_event` | PlotEvent 抽取 | `:PlotEvent` 节点至少 1 个，包含 "领养" |
 | 2 | `test_02_ontology.py::test_ontology_creates_relationships` | 角色间关系 | 李静 ↔ 张伟 之间至少 1 条边 |
 | 2 | `test_02_ontology.py::test_ontology_pronoun_resolution` | 代词不进图 | "他" "她" 不出现在 `:Character.name` 里 |
+| 3 | `test_03_query.py::test_query_returns_structured_result` | 返回 schema 完整 | 字段 character / at_scene / knows_facts / knows_characters 都在 |
+| 3 | `test_03_query.py::test_query_zhang_wei_knows_after_revelation` | 揭露后认知正确 | 张伟@1.2 的 knows_facts 提到 "领养" 或 "身世" |
+| 3 | `test_03_query.py::test_query_zhou_yajing_does_not_know` | 时序边界正确 | 周雅静@2.1 的 knows_facts 不含 "寻找/找她" |
+| 3 | `test_03_query.py::test_query_includes_known_characters` | 关系反查 | 张伟@1.2 的 knows_characters 含 "李静" |
+| 3 | `test_03_query.py::test_query_performance` | 查询延迟 | 单次 < 3s |
 
 **注意**：Stage 2 的代词消解测试有个微妙之处——`scene_01.txt` 是第一场，
 `_known_character_names()` 一开始为空，所以 `resolve_coreference` 直接返回
@@ -324,30 +331,84 @@ pytest tests/test_02_ontology.py -v
 
 ---
 
-## 8. Stage 3 预留接口（未实施）
+## 8. Stage 3 — 认知边界查询
 
-`MemoryClient` 将增加：
+### 8.1 公开接口
+`MemoryClient.query_cognitive` 同时支持两种调用形式，
+桥接 PRD §6.1 与 §7.3 的不一致：
 ```python
-async def query_cognitive(
-    self,
-    character: str,
-    at_scene_episode: int | None = None,
-    at_scene_number: int | None = None,
-    *,
-    at_scene: int | None = None,   # 兼容 PRD §6.1 的单参形式
-) -> dict
+# 形式 A（§6.1 单参）：episode 默认 1
+client.query_cognitive("张伟", at_scene=2)
+
+# 形式 B（§7.3 双参，规范形式）
+client.query_cognitive("张伟", at_scene_episode=1, at_scene_number=2)
+```
+内部统一转成 `(at_scene_episode, at_scene_number)` 后调用
+`queries.cognitive.query_character_knowledge`。
+
+### 8.2 查询管线
+
+```
+client.query_cognitive(character, episode, scene)
+              │
+              ▼
+   cutoff = _scene_reference_time(episode, scene + 1)
+              │   ↑ 注意 scene+1：包含目标场次本身已经发生的事件
+              ▼
+   graphiti.search(
+       query=f"{character} 知道的事情和遇到的人",
+       group_ids=[project_id],
+       num_results=20,
+   )
+              │   list[EntityEdge]
+              ▼
+   for each edge:
+     ├─ 过滤 1：valid_at < cutoff           （事件已经发生）
+     ├─ 过滤 2：invalid_at is None
+     │           or invalid_at > cutoff       （事件未失效）
+     ├─ 过滤 3：character in edge.fact         （确实和该角色相关）
+     ├─ 收集 fact 到 knows_facts
+     ├─ 通过 source_node_uuid / target_node_uuid 反查另一端节点
+     │   ├─ 如果另一端是 :Character → 加入 knows_characters
+     │   └─ 否则忽略
+     └─ 如果 edge.name 含 "目睹"/"witness"/"参与" → 加入 witnessed_events
+              │
+              ▼
+   {
+     "character":        "...",
+     "at_scene":         {"episode": ..., "scene": ...},
+     "knows_facts":      [...],
+     "knows_characters": [...],
+     "witnessed_events": [...],
+     "query_metadata":   {"cutoff": ..., "edges_scanned": N, "edges_kept": M},
+   }
 ```
 
-实现位于 `queries/cognitive.py`，逻辑：
-1. 用 `_scene_reference_time(episode, scene+1)` 算一个 cutoff 时间
-2. `graphiti.search(f"{character} 知道的事情和遇到的人", group_ids=[...])`
-3. 对返回的 EntityEdge 列表过滤：
-   - `valid_at < cutoff`（事件已经发生）
-   - `invalid_at is None or invalid_at > cutoff`（事件还没失效）
-   - `character in edge.fact`（确实和这个角色相关）
-4. 整理成 `{character, at_scene, knows_facts, knows_characters, witnessed_events}`
-5. 如果 `search` 召回不够，回退到直接 Cypher 查 `(:Character {name})-[r:KNOWS|WITNESSED]->()`
-   并按 `r.valid_at` 过滤——但**先报告再做**，不主动加。
+### 8.3 设计取舍
+
+- **依赖 Graphiti 的 `search` 而不是 raw Cypher**：MVP 阶段先验证 Graphiti
+  自带的混合检索（向量 + BM25 + reranker）能不能撑住业务语义查询。如果
+  Stage 3 测试发现召回不足，再退到自定义 Cypher 查 `(:Character)-[r:KNOWS|WITNESSED]->()`
+  按 `r.valid_at` 过滤——但**先报告，不主动加**（PRD §10）。
+- **`valid_at` null 的边保留**：Graphiti 的 `valid_at` 来自 LLM 解析，剧本
+  里大量事件没有显式时间词，会得到 null。如果直接丢掉这些边，几乎所有
+  事实都会消失。所以策略是：null = "无法确定，保守保留"。合成的
+  `reference_time`（Stage 1 §3.5）已经在 episode 层面给了顺序，足够支撑
+  PoC 的粒度。
+- **`character in edge.fact` 用子串匹配而不是节点 UUID 匹配**：实现简单，
+  对中文也直接生效（不需要 word boundary）。代价是同名角色可能误中——
+  PoC 范围内不处理，留给后续别名 / disambiguation 工作。
+- **`knows_characters` 通过反查 UUID 而不是再 search**：节省一次 LLM 调用。
+  Cypher 一把查双端节点，Python 侧排除自己。
+
+### 8.4 可能的失败模式与诊断
+
+| 失败 | 最可能原因 | 第一步排查 |
+|---|---|---|
+| `test_query_zhang_wei_knows_after_revelation` 失败 | Stage 2 没把"领养"抽成 PlotEvent 或没建张伟 KNOWS 边 | 去 Neo4j Browser 看 `MATCH (a:Character {name:'张伟'})-[r]->(b) RETURN a,r,b`；如果空，回到 Stage 2 调 docstring |
+| `test_query_zhou_yajing_does_not_know` 失败 | cutoff 算错 / `valid_at` 没起作用 | 打印 `result["query_metadata"]["cutoff"]`，对照 `_scene_reference_time(2, 2)`；查 edge 的实际 `valid_at` |
+| `test_query_includes_known_characters` 失败 | 反查 UUID 路径在 Graphiti 版本里字段不同 | 打印 `edge.source_node_uuid` / `target_node_uuid`，确认非 None；检查 Cypher 反查的 `labels(n)` |
+| `test_query_performance` 失败 | reranker 走了远端 API + 网络抖动 | 减小 `num_results`；本地缓存 embedder；或暂时 skip 这条用例先调正确性 |
 
 ---
 
@@ -372,13 +433,13 @@ async def query_cognitive(
 
 ## 10. 未来扩展
 
-按用户的"三层适配"框架，本 PoC 覆盖 Layer 1 全部 + Layer 2 大部分 + Layer 3 零:
+按用户的"三层适配"框架，本 PoC 覆盖三层的核心路径：
 
 | Layer | PoC 做了 | PoC 没做 |
 |---|---|---|
 | 1. 本体 | Character / Scene / PlotEvent | Foreshadowing / Setting；Edge Type Map |
 | 2. 中文 | Coreference 预处理；中文抽取指令；Scene header 锚点 | 别名字典；alias normalization |
-| 3. 查询 | — | `query_cognitive`（Stage 3） |
+| 3. 查询 | `query_cognitive` 基于 Graphiti hybrid search + valid_at 过滤 | 自定义 Cypher 路径；时间线查询；伏笔回收追踪 |
 
 PoC 全部通过 → 下一步推荐：
 1. 加 Foreshadowing + Setting + Edge Type Map

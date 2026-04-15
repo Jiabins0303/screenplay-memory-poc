@@ -25,6 +25,7 @@ from screenplay_memory.chinese.prompts import (
     SCENE_HEADER_TEMPLATE,
 )
 from screenplay_memory.ontology import ENTITY_TYPES
+from screenplay_memory.queries.cognitive import query_character_knowledge
 
 
 # Anchor for synthetic per-scene reference times. Keeping it well in the past
@@ -120,6 +121,43 @@ class MemoryClient:
             "facts_created": len(result.edges),
             "coreference_applied": bool(known),
         }
+
+    async def query_cognitive(
+        self,
+        character: str,
+        at_scene_episode: int | None = None,
+        at_scene_number: int | None = None,
+        *,
+        at_scene: int | None = None,
+    ) -> dict:
+        """Cognitive boundary query.
+
+        Accepts either form to bridge PRD §6.1 and §7.3:
+          * `query_cognitive("张伟", at_scene=2)`
+          * `query_cognitive("张伟", at_scene_episode=1, at_scene_number=2)`
+        When only `at_scene` is given, episode defaults to 1.
+        """
+        if at_scene_episode is None and at_scene_number is None:
+            if at_scene is None:
+                raise ValueError(
+                    "must provide at_scene or (at_scene_episode, at_scene_number)"
+                )
+            at_scene_episode = 1
+            at_scene_number = at_scene
+        elif at_scene_episode is None or at_scene_number is None:
+            raise ValueError(
+                "at_scene_episode and at_scene_number must be provided together"
+            )
+
+        cutoff = _scene_reference_time(at_scene_episode, at_scene_number + 1)
+        return await query_character_knowledge(
+            self._graphiti,
+            self.project_id,
+            character,
+            at_scene_episode,
+            at_scene_number,
+            cutoff,
+        )
 
     async def clear(self) -> None:
         """Project-scoped wipe — only deletes nodes in this group_id."""

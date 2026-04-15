@@ -1,0 +1,28 @@
+{
+  "queries": [
+    {
+      "test_name": "张伟在第1集第1场前不知道李静身世",
+      "character": "张伟",
+      "at_episode": 1,
+      "at_scene": 1,
+      "should_know": [],
+      "should_not_know": ["李静被领养"]
+    },
+    {
+      "test_name": "张伟在第1集第2场知道李静身世",
+      "character": "张伟",
+      "at_episode": 1,
+      "at_scene": 2,
+      "should_know": ["李静被领养"],
+      "should_not_know": []
+    },
+    {
+      "test_name": "周雅静在第2集第1场不知道女儿在找她",
+      "character": "周雅静",
+      "at_episode": 2,
+      "at_scene": 1,
+      "should_know": [],
+      "should_not_know": ["女儿在找她"]
+    }
+  ]
+}

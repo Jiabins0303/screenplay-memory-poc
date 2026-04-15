@@ -56,8 +56,14 @@ pytest tests/test_03_query.py -v
 
 如果是英文 → **停下来报告**，不要往 Stage 2 推进。
 
+## 文档
+
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — 详细技术文档（数据流、模块责任、决策细节）
+- [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) — 常见症状与修法
+
 ## 已知限制
 
 - 只支持单项目（默认 `project_id="test_project"`）
 - 只验证显式信息抽取，不做隐式推理
-- 查询性能未优化
+- 查询性能未优化（依赖 Graphiti hybrid search，未做 Cypher 兜底）
+- 没有别名字典（"李静"和"静姐"会被建成两个 Character 节点）
