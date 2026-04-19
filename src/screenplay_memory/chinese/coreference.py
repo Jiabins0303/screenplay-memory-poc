@@ -1,8 +1,8 @@
 """Pronoun / zero-pronoun resolution for Chinese narrative text.
 
-Runs *before* Graphiti, calling Qwen-7B directly via the OpenAI-compatible
-DashScope endpoint. Replaces 他/她/他们/它 with explicit character names so
-Graphiti's downstream extractor doesn't have to do pragmatics.
+Runs *before* Graphiti, calling the configured small chat model directly via
+the OpenAI-compatible OpenRouter endpoint. Replaces 他/她/他们/它 with explicit
+character names so Graphiti's downstream extractor doesn't have to do pragmatics.
 """
 
 from __future__ import annotations
@@ -32,10 +32,10 @@ async def resolve_coreference(text: str, known_characters: list[str]) -> str:
         return text
 
     s = Settings.from_env()
-    client = AsyncOpenAI(api_key=s.qwen_api_key, base_url=s.qwen_api_base)
+    client = AsyncOpenAI(api_key=s.openrouter_api_key, base_url=s.openrouter_api_base)
     try:
         resp = await client.chat.completions.create(
-            model=s.qwen_small_model,
+            model=s.chat_small_model,
             messages=[
                 {
                     "role": "user",

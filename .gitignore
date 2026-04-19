@@ -1,0 +1,81 @@
+# --- Secrets (NEVER commit these) ---
+.env
+.env.*
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# --- Testing / coverage ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# --- Linters / type checkers ---
+.ruff_cache/
+.mypy_cache/
+.pyre/
+.pytype/
+
+# --- Docker / Neo4j data volume ---
+# docker-compose.yml mounts ./data/neo4j — never commit the DB
+data/
+neo4j-data/
+
+# --- Editors / IDEs ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# --- macOS ---
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# --- Windows ---
+Thumbs.db
+Desktop.ini
+
+# --- Logs ---
+*.log
+logs/
+
+# --- Jupyter (if used for debugging) ---
+.ipynb_checkpoints/

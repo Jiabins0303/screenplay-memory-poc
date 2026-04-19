@@ -13,9 +13,9 @@
 |---|---|---|
 | 知识图谱框架 | **graphiti-core ≥ 0.3** | 时序感知、内置 LLM 抽取 + 向量召回、Pydantic 实体类型 |
 | 图数据库 | **Neo4j 5.15-community** + APOC | Graphiti 一等支持；APOC 提供调试用的图遍历过程 |
-| 推理 LLM | **Qwen2.5-72B-Instruct** via DashScope OpenAI 兼容接口 | 中文质量强；OpenAI-compatible，免去 SDK 适配 |
-| 小模型（代词消解） | **Qwen2.5-7B-Instruct** | 轻量、便宜；只做局部代词替换不需要 72B |
-| 嵌入 | **text-embedding-v3** (DashScope, 1024 dim) | 与 LLM 同源，OpenAI 兼容，免本地推理 |
+| 推理 LLM | **Qwen2.5-72B-Instruct** via OpenRouter（OpenAI 兼容） | 中文质量强；走 OpenRouter 统一入口，方便之后横向对比 Claude / GPT / Llama |
+| 小模型（代词消解） | **Qwen2.5-7B-Instruct** via OpenRouter | 轻量、便宜；只做局部代词替换不需要 72B |
+| 嵌入 | **Qwen3-Embedding-8B** via OpenRouter（4096 dim） | 原生多语言含中文；和 chat 同一把 key、同一个 base URL |
 | Reranker / Cross-encoder | `OpenAIRerankerClient(llm_client)` 复用 Qwen-72B | Graphiti 通用客户端必须显式传 reranker，否则会回退到默认 OpenAI 端点 401 |
 
 ### 1.2 包结构
@@ -107,34 +107,37 @@ src/screenplay_memory/
 
 ## 3. 三个关键决策的细节
 
-### 3.1 Qwen 通过 OpenAIGenericClient 接入
+### 3.1 通过 OpenAIGenericClient 接入 OpenRouter
 
-DashScope 提供了 OpenAI 兼容接口，路径是
-`https://dashscope.aliyuncs.com/compatible-mode/v1`。Graphiti 有 3 种 LLM 客户端：
+OpenRouter 提供了 OpenAI 兼容接口（chat + embeddings），路径是
+`https://openrouter.ai/api/v1`。Graphiti 有 3 种 LLM 客户端：
 
 | 客户端 | 适用 | 原因 |
 |---|---|---|
 | `OpenAIClient` | 真正的 OpenAI | 默认 8K token cap；针对官方 endpoint 调优 |
 | `AzureOpenAILLMClient` | Azure | 走 Azure 的 deployment 路径 |
-| **`OpenAIGenericClient`** | 任何 OpenAI 兼容端点（Ollama、vLLM、DashScope...） | 16K cap、完整结构化输出支持、容忍非 OpenAI 字段差异 |
+| **`OpenAIGenericClient`** | 任何 OpenAI 兼容端点（Ollama、vLLM、OpenRouter、DashScope...） | 16K cap、完整结构化输出支持、容忍非 OpenAI 字段差异 |
 
 代码（`client.py`）：
 ```python
 llm_config = LLMConfig(
-    api_key=s.qwen_api_key,
-    model=s.qwen_model,           # qwen2.5-72b-instruct
-    small_model=s.qwen_small_model,
-    base_url=s.qwen_api_base,     # DashScope 兼容端点
+    api_key=s.openrouter_api_key,
+    model=s.chat_model,              # qwen/qwen-2.5-72b-instruct
+    small_model=s.chat_small_model,  # qwen/qwen-2.5-7b-instruct
+    base_url=s.openrouter_api_base,  # https://openrouter.ai/api/v1
 )
 llm_client = OpenAIGenericClient(config=llm_config)
 embedder = OpenAIEmbedder(config=OpenAIEmbedderConfig(
-    api_key=s.embedding_api_key,
-    embedding_model="text-embedding-v3",
-    embedding_dim=1024,
-    base_url=s.embedding_api_base,
+    api_key=s.openrouter_api_key,    # 同一把 key
+    embedding_model=s.embedding_model,  # qwen/qwen3-embedding-8b
+    embedding_dim=s.embedding_dim,      # 4096
+    base_url=s.openrouter_api_base,     # 同一个 base URL
 ))
 reranker = OpenAIRerankerClient(client=llm_client, config=llm_config)
 ```
+
+**换模型**：只改 `.env` 里的 `CHAT_MODEL` / `EMBEDDING_MODEL` / `EMBEDDING_DIM`，
+客户端代码一行不动。换 embedding 模型后需要 `docker compose down -v` 清库重建索引。
 
 **坑点**：如果不显式传 `cross_encoder=reranker`，Graphiti 会用默认
 `OpenAIRerankerClient`，它回退到官方 OpenAI 端点 → 401。这是 Ollama
@@ -297,37 +300,41 @@ prompts.py 加强代词排除规则，而不是去 coreference.py。
 | Scene header 句子被 LLM 当成普通描写丢弃 | Neo4j 里看不到 `:Scene` 节点 | 把 header 改得更"实体化"：`第1集第2场，地点：咖啡馆`|
 | 别名分裂（"李静"和"静儿"建成两个节点） | `get_nodes_by_label("Character")` 出现重复人 | Stage 2.5：加别名字典预处理（PRD 范围外）|
 | Reranker 401 | `search` 报 OpenAI auth error | 确认 `cross_encoder=OpenAIRerankerClient(...)` 已传给 Graphiti 构造器 |
-| `text-embedding-v3` dim 不是 1024 | `add_episode` 报 vector dim mismatch | 调整 `Settings.embedding_dim`，重建 Neo4j 索引（`clear_data + build_indices_and_constraints`） |
+| embedding 维度不匹配 | `add_episode` 报 vector dim mismatch | 换 embedding 模型后务必同步 `EMBEDDING_DIM` 并 `docker compose down -v` 清库重建索引 |
 
 ---
 
-## 7. 运行步骤（30 分钟）
+## 7. 运行步骤
+
+**详细步骤、验证方法、预期输出** 见 [README.md — 详细运行步骤](README.md#详细运行步骤)（每一步都有验证命令和预期输出）。
+
+本节只保留关键路径的 TL;DR：
 
 ```bash
-# 1. 启 Neo4j
+# 0. 前置：获取 https://openrouter.ai 的 API key，充 $1-5 credits
+
+# 1. 启 Neo4j + 安装依赖 + 配置
 docker compose up -d
-# 等 ~10s 让 Neo4j 起来，浏览器打开 http://localhost:7474 验证
-
-# 2. 装包
 pip install -e ".[dev]"
-
-# 3. 配 env
 cp .env.example .env
-# 编辑 .env，填入 QWEN_API_KEY 和 EMBEDDING_API_KEY（DashScope 同一把 key 即可）
+# 编辑 .env，填入 OPENROUTER_API_KEY
 
-# 4. Stage 1 — 不允许跳过手动 Neo4j 检查
+# 2. Stage 1 — 基座测试（不加任何适配）
 pytest tests/test_01_baseline.py -v
-# 然后在 Neo4j Browser 跑：
+# 必做：在 http://localhost:7474 跑
 #   MATCH (n) WHERE n.group_id='test_project' RETURN n LIMIT 50
-# 节点 name 必须是中文。如果是英文 → 停下来报告，不进 Stage 2。
+# 确认节点 name 是中文。如果是英文 → 停下来，不进 Stage 2
 
-# 5. Stage 2
+# 3. Stage 2 — 本体 + 中文适配
 pytest tests/test_02_ontology.py -v
-# 预期：可能要迭代 prompts.py / ontology docstring 3-5 次才能全过
+# 预期：可能要迭代 prompts.py / ontology docstring 几次才能全过
 
-# 6. Stage 3（未实施）
-# pytest tests/test_03_query.py -v
+# 4. Stage 3 — 认知边界查询
+pytest tests/test_03_query.py -v
 ```
+
+**换模型**（chat 或 embedding）只改 `.env`，代码不动;换 embedding 模型要
+`docker compose down -v` 清库重建向量索引。详见 [README — 切换模型](README.md#切换模型)。
 
 ---
 

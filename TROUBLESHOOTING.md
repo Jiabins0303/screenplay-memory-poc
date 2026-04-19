@@ -15,10 +15,56 @@
 **原因**：同上，或者从错误的子模块 import。
 **修法**：路径是 `from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient`。
 
-### `RuntimeError: Missing required env vars: ['QWEN_API_KEY']`
+### `RuntimeError: Missing required env vars: ['OPENROUTER_API_KEY']`
 **原因**：`.env` 没拷贝或没填。
-**修法**：`cp .env.example .env` 后填 DashScope key。`Settings.from_env()` 故意做 fail-fast，
-不要在 `config.py` 给 `QWEN_API_KEY` 默认值——把配置错误留到运行时再炸更难调。
+**修法**：`cp .env.example .env` 后填 OpenRouter key（在 https://openrouter.ai 账户页生成，
+形如 `sk-or-v1-...`）。`Settings.from_env()` 故意做 fail-fast，不要在 `config.py` 给
+`OPENROUTER_API_KEY` 默认值——把配置错误留到运行时再炸更难调。
+
+---
+
+## OpenRouter 相关
+
+### `401 Unauthorized` / `Invalid API key`
+**原因**：`.env` 里的 `OPENROUTER_API_KEY` 错了（过期、删了、复制时多/少字符）。
+**修法**：
+1. 打开 https://openrouter.ai/settings/keys 确认 key 还在且未禁用
+2. 如果在，重新复制一次粘贴到 `.env`（注意不要带两头空格）
+3. 用 curl 独立验证：
+   ```bash
+   curl https://openrouter.ai/api/v1/models \
+     -H "Authorization: Bearer $OPENROUTER_API_KEY" | head -c 200
+   ```
+   返回 JSON 列表 → key 有效；返回 `{"error":...}` → 无效
+
+### `402 Payment Required` / `Insufficient credits`
+**原因**：OpenRouter 余额不足。
+**修法**：https://openrouter.ai/settings/credits 充值。PoC 全量跑完三阶段预计
+消耗 < $0.50（Qwen 系列便宜）。换成 Claude Sonnet 等大模型会显著上升。
+
+### `404 Model not found` / `not a valid model ID`
+**原因**：`CHAT_MODEL` / `EMBEDDING_MODEL` 写错。OpenRouter 的格式是
+`{provider}/{model-name}`，例如 `qwen/qwen-2.5-72b-instruct`——注意有连字符。
+**修法**：
+1. 打开 https://openrouter.ai/models?q=qwen 搜索想用的模型
+2. 看页面 URL `openrouter.ai/<provider>/<model-id>`，model ID 就在这里
+3. `.env` 里的值照抄
+
+### `429 Rate limit exceeded`
+**原因**：OpenRouter 对免费账户和新账户有较低的 rpm 限制；有些 provider 也会单独限流。
+**修法**：
+1. 等 1 分钟重试（临时）
+2. 充值后限制会放宽
+3. 跑测试时串行不要并发：`pytest -x`（fail-fast 模式不会并发）
+
+### OpenRouter 延迟明显高于 DashScope（中国大陆）
+**症状**：单次 `ingest` 要 30s+，Stage 3 的 `test_query_performance` 经常超 3s。
+**原因**：OpenRouter 服务器在美国，跨洋延迟 + OpenRouter 自己也要路由一跳。
+**可选修法**：
+- 把 `test_query_performance` 的阈值从 3s 放宽到 5s（改测试是最后手段，先报告）
+- 在 `.env` 指定 provider 走距离近的 provider（例如 `DeepInfra` 在新加坡有节点）：
+  暂不在本 PoC 支持，未来可通过 `extra_body={"provider": {"order": [...]}}` 实现
+- 回退到 DashScope：见 git history（`git log --all --oneline` 找切换前的 commit）
 
 ---
 
@@ -75,12 +121,22 @@ self._graphiti = Graphiti(..., cross_encoder=reranker)
 - 把 Field description 写得更显式：`"必须是以下英文 enum 之一：protagonist/antagonist/supporting"`；
 - 或者放宽类型：`role_type: str = Field(...)` 不强制 Literal——本 PoC 已经这样。
 
-### `text-embedding-v3` dim mismatch
-**症状**：`vector dimension mismatch: expected 1024, got 1536`
-**原因**：DashScope text-embedding-v3 默认 dim 1024，但如果你换成 OpenAI
-官方 `text-embedding-3-small` 是 1536。
-**修法**：调 `Settings.embedding_dim`，然后**清空 Neo4j 重建索引**——
-向量索引一旦建好，dim 就锁死了：
+### Embedding dim mismatch
+**症状**：`vector dimension mismatch: expected 4096, got 1024`（或反过来）
+**原因**：`EMBEDDING_MODEL` 和 `EMBEDDING_DIM` 不匹配，或者之前跑过其他 embedding
+模型在 Neo4j 里建了固定维度的向量索引。常见维度参考：
+- `qwen/qwen3-embedding-8b` → 4096
+- `qwen/qwen3-embedding-4b` → 2560
+- `qwen/qwen3-embedding-0.6b` → 1024
+- `openai/text-embedding-3-small` → 1536
+- `openai/text-embedding-3-large` → 3072
+
+**修法**：先在 `.env` 对齐 `EMBEDDING_MODEL` + `EMBEDDING_DIM`，然后**清空 Neo4j
+重建索引**——向量索引一旦建好，dim 就锁死了：
+```bash
+docker compose down -v && docker compose up -d
+```
+或者在代码里：
 ```python
 from graphiti_core.utils.maintenance.graph_data_operations import clear_data
 await clear_data(client._graphiti.driver)
@@ -134,7 +190,7 @@ from screenplay_memory.chinese.coreference import resolve_coreference
 print(await resolve_coreference("李静走进来。她坐下。", ["李静"]))
 # 期望: "李静走进来。李静坐下。"
 ```
-如果 7B 表现差，考虑临时换 `qwen_small_model = qwen2.5-72b-instruct`。
+如果 7B 表现差，考虑临时把 `CHAT_SMALL_MODEL` 换成更大的模型（例如 `qwen/qwen-2.5-72b-instruct`）。
 
 ---
 

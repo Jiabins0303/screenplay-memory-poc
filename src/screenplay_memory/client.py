@@ -50,18 +50,18 @@ class MemoryClient:
         s = Settings.from_env()
 
         llm_config = LLMConfig(
-            api_key=s.qwen_api_key,
-            model=s.qwen_model,
-            small_model=s.qwen_small_model,
-            base_url=s.qwen_api_base,
+            api_key=s.openrouter_api_key,
+            model=s.chat_model,
+            small_model=s.chat_small_model,
+            base_url=s.openrouter_api_base,
         )
         llm_client = OpenAIGenericClient(config=llm_config)
         embedder = OpenAIEmbedder(
             config=OpenAIEmbedderConfig(
-                api_key=s.embedding_api_key,
+                api_key=s.openrouter_api_key,
                 embedding_model=s.embedding_model,
                 embedding_dim=s.embedding_dim,
-                base_url=s.embedding_api_base,
+                base_url=s.openrouter_api_base,
             )
         )
         reranker = OpenAIRerankerClient(client=llm_client, config=llm_config)
