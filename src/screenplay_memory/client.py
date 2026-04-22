@@ -9,6 +9,7 @@ Stage 1 was a bare baseline. Stage 2 layers on:
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone, timedelta
 
 from graphiti_core import Graphiti
@@ -56,12 +57,16 @@ class MemoryClient:
             small_model=s.chat_small_model,
             base_url=s.openrouter_api_base,
         )
-        # 8192 balances two constraints:
-        # - OpenRouter per-request credit window (~12498 tokens max)
-        # - Prior-episode context makes extraction JSON longer; 4096 got
-        #   truncated, produced malformed JSON, the retry then emitted a
-        #   bogus multi-thousand-digit integer that blew up Neo4j's codec.
-        llm_client = OpenAIGenericClient(config=llm_config, max_tokens=8192)
+        # max_tokens trade-off:
+        # - Too high → OpenRouter 402 when the key's per-request credit
+        #   budget is smaller than the reservation (fixable by raising
+        #   the key's credit limit at openrouter.ai/settings/keys).
+        # - Too low (~4096) → extraction JSON gets truncated, retry then
+        #   emits malformed output that blows up Neo4j's codec.
+        # 5000 is the empirical floor that still fits the extraction JSON;
+        # bump to 8192 via LLM_MAX_TOKENS=8192 once the key has headroom.
+        max_tokens = int(os.getenv("LLM_MAX_TOKENS", "5000"))
+        llm_client = OpenAIGenericClient(config=llm_config, max_tokens=max_tokens)
         embedder = OpenAIEmbedder(
             config=OpenAIEmbedderConfig(
                 api_key=s.openrouter_api_key,
