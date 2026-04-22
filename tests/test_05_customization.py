@@ -104,8 +104,47 @@ def test_spec_to_pydantic_rejects_unknown_type():
 
 
 def test_spec_to_pydantic_rejects_non_identifier_name():
-    with pytest.raises(OntologySpecError, match="invalid class name"):
+    with pytest.raises(OntologySpecError, match="not an identifier"):
         spec_to_pydantic({"entities": [{"name": "123bad", "fields": []}], "edges": []})
+
+
+def test_spec_to_pydantic_rejects_underscore_prefix_class():
+    with pytest.raises(OntologySpecError, match="reserved for internals"):
+        spec_to_pydantic(
+            {"entities": [{"name": "_Private", "fields": []}], "edges": []}
+        )
+
+
+def test_spec_to_pydantic_rejects_dunder_field():
+    with pytest.raises(OntologySpecError, match="reserved for internals"):
+        spec_to_pydantic(
+            {
+                "entities": [
+                    {"name": "X", "fields": [{"name": "__class__", "type": "str"}]}
+                ],
+                "edges": [],
+            }
+        )
+
+
+def test_spec_to_pydantic_rejects_pydantic_reserved_field():
+    with pytest.raises(OntologySpecError, match="Pydantic BaseModel attribute"):
+        spec_to_pydantic(
+            {
+                "entities": [
+                    {"name": "X", "fields": [{"name": "model_config", "type": "str"}]}
+                ],
+                "edges": [],
+            }
+        )
+
+
+def test_spec_to_pydantic_rejects_over_long_name():
+    big = "a" * 65
+    with pytest.raises(OntologySpecError, match="exceeds"):
+        spec_to_pydantic(
+            {"entities": [{"name": big, "fields": []}], "edges": []}
+        )
 
 
 def test_spec_to_pydantic_rejects_eval_like_token():

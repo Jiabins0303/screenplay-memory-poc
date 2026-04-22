@@ -51,6 +51,50 @@ _PRIMITIVE_TYPES: dict[str, type] = {
 
 _VALID_LAYERS = frozenset({"detail", "hl"})
 
+# Name guards for dynamically-synthesised Pydantic classes.
+# `str.isidentifier()` alone accepts dunder names (``__class__``, ``__init__``)
+# and Pydantic v2 internals (``model_config``, ``model_fields`` …) which would
+# either collide with BaseModel machinery or shadow private state. The class
+# name + field name guards below reject those.
+_MAX_NAME_LEN = 64
+_PYDANTIC_RESERVED_FIELDS = frozenset({
+    "model_config",
+    "model_fields",
+    "model_dump",
+    "model_dump_json",
+    "model_validate",
+    "model_validate_json",
+    "model_validate_strings",
+    "model_json_schema",
+    "model_copy",
+    "model_construct",
+    "model_fields_set",
+    "model_extra",
+    "model_parametrized_name",
+    "model_post_init",
+    "model_rebuild",
+})
+
+
+def _assert_safe_name(kind: str, name: object, *, is_field: bool) -> str:
+    """Validate a class or field name. Raises on dunders, leading underscores,
+    Pydantic-reserved names, excessive length, or non-identifiers."""
+    if not isinstance(name, str) or not name.isidentifier():
+        raise OntologySpecError(f"{kind}: not an identifier: {name!r}")
+    if len(name) > _MAX_NAME_LEN:
+        raise OntologySpecError(
+            f"{kind}: {name!r} exceeds {_MAX_NAME_LEN} characters"
+        )
+    if name.startswith("_"):
+        raise OntologySpecError(
+            f"{kind}: {name!r} starts with '_', which is reserved for internals"
+        )
+    if is_field and name in _PYDANTIC_RESERVED_FIELDS:
+        raise OntologySpecError(
+            f"{kind}: {name!r} collides with a Pydantic BaseModel attribute"
+        )
+    return name
+
 
 class OntologySpecError(ValueError):
     """Raised when a spec is missing required fields or uses a disallowed type."""
@@ -126,9 +170,7 @@ def spec_to_pydantic(spec: dict) -> tuple[dict[str, type[BaseModel]], dict[str, 
 def _build_model(entry: dict) -> type[BaseModel]:
     if not isinstance(entry, dict):
         raise OntologySpecError(f"expected object, got {type(entry).__name__}")
-    name = entry.get("name")
-    if not isinstance(name, str) or not name.isidentifier():
-        raise OntologySpecError(f"invalid class name: {name!r}")
+    name = _assert_safe_name("class name", entry.get("name"), is_field=False)
     description = entry.get("description", "")
     fields_spec = entry.get("fields", [])
     if not isinstance(fields_spec, list):
@@ -146,9 +188,9 @@ def _build_model(entry: dict) -> type[BaseModel]:
 def _resolve_field(cls_name: str, field: dict) -> tuple[str, Any, Any]:
     if not isinstance(field, dict):
         raise OntologySpecError(f"{cls_name}: field entry must be an object")
-    fname = field.get("name")
-    if not isinstance(fname, str) or not fname.isidentifier():
-        raise OntologySpecError(f"{cls_name}: invalid field name {fname!r}")
+    fname = _assert_safe_name(
+        f"{cls_name} field name", field.get("name"), is_field=True
+    )
     type_token = field.get("type")
     ftype = _resolve_type(cls_name, fname, type_token)
 

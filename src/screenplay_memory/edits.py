@@ -88,9 +88,38 @@ async def merge_nodes(
     relationships of ``src`` are re-pointed at ``dst`` preserving type and
     properties, then ``src`` is deleted. The first element of the input
     list is the survivor.
+
+    Safety: node matching is ``group_id``-scoped, but APOC re-points every
+    incident relationship regardless of edge ``group_id``. To keep the
+    file-level invariant "an edit can never reach across projects", we
+    pre-check that ``src`` carries no edges whose ``group_id`` belongs to
+    a different project, and refuse the merge if any such edges exist.
+    Edges with ``group_id='bridge'`` (the HL→detail scene bridge) are
+    allowed — they are expected cross-group links owned by this project.
     """
     if src_uuid == dst_uuid:
         raise EditError("cannot merge a node into itself")
+
+    async with graphiti.driver.session() as sess:
+        cross = await sess.run(
+            """
+            MATCH (src {uuid: $src, group_id: $gid})-[r]-()
+            WHERE coalesce(r.group_id, $gid) <> $gid
+              AND coalesce(r.group_id, '') <> 'bridge'
+            RETURN count(r) AS bad
+            """,
+            src=src_uuid,
+            gid=project_id,
+        )
+        row = await cross.single()
+        bad = row["bad"] if row else 0
+    if bad:
+        raise EditError(
+            f"merge refused: src={src_uuid} has {bad} relationship(s) "
+            f"belonging to other projects; these would be silently migrated "
+            f"into {project_id} by apoc.refactor.mergeNodes"
+        )
+
     async with graphiti.driver.session() as sess:
         result = await sess.run(
             """

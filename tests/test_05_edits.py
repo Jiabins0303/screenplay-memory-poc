@@ -198,3 +198,80 @@ async def test_merge_refuses_self(memory_client):
         await merge_nodes(
             memory_client._graphiti, memory_client.project_id, "x", "x"
         )
+
+
+@pytest.mark.asyncio
+async def test_merge_refuses_cross_project_src_edges(memory_client):
+    """H2 safety guard: if src has an edge whose group_id belongs to another
+    project, merging would silently migrate that edge into this project.
+    merge_nodes must refuse up-front."""
+    await _seed_nodes(
+        memory_client,
+        [
+            {"uuid": "src", "name": "别名", "label": "Character"},
+            {"uuid": "dst", "name": "正名", "label": "Character"},
+        ],
+    )
+    # Seed a foreign-project node + a cross-project edge whose group_id is
+    # the foreign project's id.
+    async with memory_client._graphiti.driver.session() as sess:
+        await sess.run(
+            """
+            CREATE (f:Entity {uuid: 'f', name: 'foreign',
+                              group_id: 'other_proj'})
+            WITH f
+            MATCH (src {uuid: 'src', group_id: $gid})
+            CREATE (src)-[:LINK {uuid: 'e-cross',
+                                 group_id: 'other_proj'}]->(f)
+            """,
+            gid=memory_client.project_id,
+        )
+    try:
+        with pytest.raises(EditError, match="other projects"):
+            await merge_nodes(
+                memory_client._graphiti,
+                memory_client.project_id,
+                "src",
+                "dst",
+            )
+        # The cross-project edge must still exist — merge aborted before APOC.
+        async with memory_client._graphiti.driver.session() as sess:
+            result = await sess.run(
+                "MATCH ()-[r {uuid: 'e-cross'}]->() RETURN count(r) AS c"
+            )
+            row = await result.single()
+        assert row["c"] == 1
+    finally:
+        async with memory_client._graphiti.driver.session() as sess:
+            await sess.run(
+                "MATCH (n {group_id: 'other_proj'}) DETACH DELETE n"
+            )
+
+
+@pytest.mark.asyncio
+async def test_merge_allows_bridge_edges(memory_client):
+    """The HL→detail ``:COVERS`` bridge uses ``group_id='bridge'``; those
+    edges are intentionally cross-group and must not block a merge."""
+    await _seed_nodes(
+        memory_client,
+        [
+            {"uuid": "src", "name": "别名", "label": "Character"},
+            {"uuid": "dst", "name": "正名", "label": "Character"},
+            {"uuid": "beat", "name": "某节拍", "label": "Entity"},
+        ],
+    )
+    async with memory_client._graphiti.driver.session() as sess:
+        await sess.run(
+            """
+            MATCH (src {uuid: 'src', group_id: $gid})
+            MATCH (b {uuid: 'beat', group_id: $gid})
+            CREATE (b)-[:COVERS {uuid: 'bridge-1',
+                                  group_id: 'bridge'}]->(src)
+            """,
+            gid=memory_client.project_id,
+        )
+    # Should succeed despite the cross-group 'bridge' edge.
+    result = await merge_nodes(
+        memory_client._graphiti, memory_client.project_id, "src", "dst"
+    )
+    assert result["uuid"] == "dst"
