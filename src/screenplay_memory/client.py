@@ -26,7 +26,13 @@ from screenplay_memory.chinese.prompts import (
     CHINESE_EXTRACTION_INSTRUCTIONS,
     SCENE_HEADER_TEMPLATE,
 )
+from screenplay_memory.chinese.prompts_hl import (
+    HL_EXTRACTION_INSTRUCTIONS,
+    build_hl_document,
+)
 from screenplay_memory.ontology import EDGE_TYPES, ENTITY_TYPES
+from screenplay_memory.ontology_customization import load_spec, spec_to_pydantic
+from screenplay_memory.ontology_hl import HL_EDGE_TYPES, HL_ENTITY_TYPES
 from screenplay_memory.queries.cognitive import query_character_knowledge
 
 
@@ -47,8 +53,30 @@ def _scene_reference_time(episode: int, scene: int) -> datetime:
 class MemoryClient:
     """Single-tenant facade over Graphiti."""
 
-    def __init__(self, project_id: str):
+    def __init__(
+        self,
+        project_id: str,
+        *,
+        entity_types_override: dict | None = None,
+        edge_types_override: dict | None = None,
+        hl_entity_types_override: dict | None = None,
+        hl_edge_types_override: dict | None = None,
+    ):
         self.project_id = project_id
+        # None sentinel means "fall through to saved spec in Neo4j, then to
+        # the module defaults". Resolution happens lazily in _ensure_init()
+        # because load_spec() is async.
+        self._entity_types_override = entity_types_override
+        self._edge_types_override = edge_types_override
+        self._hl_entity_types_override = hl_entity_types_override
+        self._hl_edge_types_override = hl_edge_types_override
+        # Populated during _ensure_init(). Default HL types come from the
+        # built-in ontology_hl package; a persisted spec overrides them.
+        self._entity_types = ENTITY_TYPES
+        self._edge_types = EDGE_TYPES
+        self._hl_entity_types: dict = HL_ENTITY_TYPES
+        self._hl_edge_types: dict = HL_EDGE_TYPES
+
         s = Settings.from_env()
 
         llm_config = LLMConfig(
@@ -90,7 +118,39 @@ class MemoryClient:
     async def _ensure_init(self) -> None:
         if not self._initialized:
             await self._graphiti.build_indices_and_constraints()
+            await self._resolve_ontology_overrides()
             self._initialized = True
+
+    async def _resolve_ontology_overrides(self) -> None:
+        """Pick the final entity_types / edge_types per layer.
+
+        Precedence per layer: constructor kwarg > persisted OntologyConfig
+        node in Neo4j > built-in module defaults.
+        """
+        if self._entity_types_override is not None:
+            self._entity_types = self._entity_types_override
+        else:
+            spec = await load_spec(self._graphiti, self.project_id, "detail")
+            if spec is not None:
+                ents, edges = spec_to_pydantic(spec)
+                self._entity_types = ents or ENTITY_TYPES
+                if self._edge_types_override is None and edges:
+                    self._edge_types = edges
+        if self._edge_types_override is not None:
+            self._edge_types = self._edge_types_override
+
+        if self._hl_entity_types_override is not None:
+            self._hl_entity_types = self._hl_entity_types_override
+        else:
+            spec_hl = await load_spec(self._graphiti, self.project_id, "hl")
+            if spec_hl is not None:
+                hl_ents, hl_edges = spec_to_pydantic(spec_hl)
+                if hl_ents:
+                    self._hl_entity_types = hl_ents
+                if self._hl_edge_types_override is None and hl_edges:
+                    self._hl_edge_types = hl_edges
+        if self._hl_edge_types_override is not None:
+            self._hl_edge_types = self._hl_edge_types_override
 
     async def _known_character_names(self) -> list[str]:
         """Existing Character nodes in this project — used to bootstrap coreference."""
@@ -139,8 +199,8 @@ class MemoryClient:
             source=EpisodeType.text,
             reference_time=ref_time,
             group_id=self.project_id,
-            entity_types=ENTITY_TYPES,
-            edge_types=EDGE_TYPES,
+            entity_types=self._entity_types,
+            edge_types=self._edge_types,
             previous_episode_uuids=prior_episodes,
         )
         # Use the *raw* content for negation detection, not the coreference-
@@ -159,6 +219,63 @@ class MemoryClient:
             "witness_scope": annotation["witness_scope"],
             "negated": annotation["negated"],
         }
+
+    async def ingest_hl(self, scenes: list[tuple[int, int, str]]) -> dict:
+        """Ingest the whole script into the high-level ("beat") layer.
+
+        HL extraction runs **once per full script**, not per scene: the LLM
+        needs the whole arc in context to decide what counts as Hook vs.
+        Midpoint vs. Climax. Nodes and edges land under
+        ``group_id=f"{project_id}__hl"`` so the detail layer is untouched.
+
+        ``scenes`` is the same ``(episode, scene, body)`` tuple list used
+        for detail ingest; we concatenate it with HL scene headers.
+        """
+        await self._ensure_init()
+
+        body = build_hl_document(scenes)
+        hl_gid = f"{self.project_id}__hl"
+        # Use the last scene's synthetic timestamp as reference_time so HL
+        # edges land at a time after all detail edges — avoids accidental
+        # cross-layer temporal interleaving in search.
+        last_ep, last_scene = (scenes[-1][0], scenes[-1][1]) if scenes else (1, 1)
+        ref_time = _scene_reference_time(last_ep, last_scene + 1)
+
+        result = await self._graphiti.add_episode(
+            name=f"HL__{self.project_id}",
+            episode_body=body,
+            source_description=HL_EXTRACTION_INSTRUCTIONS,
+            source=EpisodeType.text,
+            reference_time=ref_time,
+            group_id=hl_gid,
+            entity_types=self._hl_entity_types,
+            edge_types=self._hl_edge_types,
+        )
+        return {
+            "status": "success",
+            "layer": "hl",
+            "entities_created": len(result.nodes),
+            "facts_created": len(result.edges),
+        }
+
+    async def query_beats(self) -> list[dict]:
+        """Return all Beat nodes in the HL layer, ordered by start scene.
+
+        Used by the 3D viewer to populate the HL panel. Plain Cypher — no
+        Graphiti search — because the HL graph is small (6-12 nodes) and
+        we want deterministic ordering for the UI.
+        """
+        hl_gid = f"{self.project_id}__hl"
+        async with self._graphiti.driver.session() as sess:
+            result = await sess.run(
+                """
+                MATCH (b:Entity) WHERE b.group_id = $gid
+                AND (b.beat_type IS NOT NULL OR 'Beat' IN labels(b))
+                RETURN b ORDER BY b.scene_range_start ASC
+                """,
+                gid=hl_gid,
+            )
+            return [dict(row["b"]) async for row in result]
 
     async def query_cognitive(
         self,
@@ -198,11 +315,17 @@ class MemoryClient:
         )
 
     async def clear(self) -> None:
-        """Project-scoped wipe — only deletes nodes in this group_id."""
+        """Project-scoped wipe — deletes detail layer, HL layer, and saved
+        OntologyConfig for this project. Other projects are untouched."""
+        hl_gid = f"{self.project_id}__hl"
         async with self._graphiti.driver.session() as sess:
             await sess.run(
-                "MATCH (n) WHERE n.group_id = $gid DETACH DELETE n",
-                gid=self.project_id,
+                "MATCH (n) WHERE n.group_id IN $gids DETACH DELETE n",
+                gids=[self.project_id, hl_gid],
+            )
+            await sess.run(
+                "MATCH (c:OntologyConfig {project_id: $pid}) DETACH DELETE c",
+                pid=self.project_id,
             )
 
     async def close(self) -> None:

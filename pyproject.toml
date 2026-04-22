@@ -20,6 +20,13 @@ dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.23",
     "ruff",
+    "httpx",
+]
+api = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "sse-starlette>=2.0",
+    "python-multipart",
 ]
 
 [tool.setuptools.packages.find]
