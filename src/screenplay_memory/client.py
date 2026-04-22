@@ -18,13 +18,14 @@ from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
 from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
 from graphiti_core.nodes import EpisodeType
 
+from screenplay_memory.annotations import annotate_witness_scope
 from screenplay_memory.config import Settings
 from screenplay_memory.chinese.coreference import resolve_coreference
 from screenplay_memory.chinese.prompts import (
     CHINESE_EXTRACTION_INSTRUCTIONS,
     SCENE_HEADER_TEMPLATE,
 )
-from screenplay_memory.ontology import ENTITY_TYPES
+from screenplay_memory.ontology import EDGE_TYPES, ENTITY_TYPES
 from screenplay_memory.queries.cognitive import query_character_knowledge
 
 
@@ -55,7 +56,12 @@ class MemoryClient:
             small_model=s.chat_small_model,
             base_url=s.openrouter_api_base,
         )
-        llm_client = OpenAIGenericClient(config=llm_config)
+        # 8192 balances two constraints:
+        # - OpenRouter per-request credit window (~12498 tokens max)
+        # - Prior-episode context makes extraction JSON longer; 4096 got
+        #   truncated, produced malformed JSON, the retry then emitted a
+        #   bogus multi-thousand-digit integer that blew up Neo4j's codec.
+        llm_client = OpenAIGenericClient(config=llm_config, max_tokens=8192)
         embedder = OpenAIEmbedder(
             config=OpenAIEmbedderConfig(
                 api_key=s.openrouter_api_key,
@@ -91,6 +97,20 @@ class MemoryClient:
             )
             return [r["name"] async for r in result]
 
+    async def _recent_episode_uuids(self, limit: int = 5) -> list[str]:
+        """Most recent Episodic UUIDs — passed to Graphiti so cross-scene
+        references (e.g. '30年前送出的女儿' → 李静) resolve against earlier
+        scenes instead of creating hallucinated new Characters."""
+        async with self._graphiti.driver.session() as sess:
+            result = await sess.run(
+                "MATCH (e:Episodic) WHERE e.group_id = $gid "
+                "RETURN e.uuid AS uuid "
+                "ORDER BY e.created_at DESC LIMIT $limit",
+                gid=self.project_id,
+                limit=limit,
+            )
+            return [r["uuid"] async for r in result]
+
     async def ingest(self, content: str, episode: int, scene: int) -> dict:
         """Ingest a screenplay chunk.
 
@@ -101,6 +121,7 @@ class MemoryClient:
 
         known = await self._known_character_names()
         resolved = await resolve_coreference(content, known)
+        prior_episodes = await self._recent_episode_uuids()
 
         scene_header = SCENE_HEADER_TEMPLATE.format(episode=episode, scene=scene)
         body = f"{scene_header}\n\n{resolved}"
@@ -114,12 +135,24 @@ class MemoryClient:
             reference_time=ref_time,
             group_id=self.project_id,
             entity_types=ENTITY_TYPES,
+            edge_types=EDGE_TYPES,
+            previous_episode_uuids=prior_episodes,
+        )
+        # Use the *raw* content for negation detection, not the coreference-
+        # resolved body. When a new character (e.g. 周雅静) first appears,
+        # coreference can mis-bind pronouns to already-known characters,
+        # stripping the '她 不知道' signal. The original text is the only
+        # reliable source for narration semantics.
+        annotation = await annotate_witness_scope(
+            self._graphiti, self.project_id, result.episode.uuid, content
         )
         return {
             "status": "success",
             "entities_created": len(result.nodes),
             "facts_created": len(result.edges),
             "coreference_applied": bool(known),
+            "witness_scope": annotation["witness_scope"],
+            "negated": annotation["negated"],
         }
 
     async def query_cognitive(

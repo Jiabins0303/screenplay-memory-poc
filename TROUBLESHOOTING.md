@@ -80,6 +80,18 @@ lsof -i :7687                    # 看端口占用
 ```
 首次启动 Neo4j 大概要 10-15 秒，可以等一下再试。
 
+### `Neo.ClientError.Statement.SyntaxError: Unknown function 'vector.similarity.cosine'`
+**症状**：`pytest` 跑到 `add_episode` 时报上面这条错，测试全红。
+**原因**：Neo4j 版本太老。`vector.similarity.cosine()` 是 Neo4j **5.18+** 才有的标量函数，
+graphiti-core 的 hybrid search 强依赖它。如果 `docker-compose.yml` 钉的是 `5.15` 或更早，就会炸。
+**修法**：
+1. 把 `docker-compose.yml` 的 image 升到 ≥ `neo4j:5.18-community`（推荐 `5.26-community` LTS）
+2. 清掉老数据卷 + 重启：
+   ```bash
+   docker compose down -v && rm -rf data/ && docker compose up -d
+   ```
+3. 等 15-20 秒让 Neo4j 初始化完成，再重跑测试
+
 ### `Neo.ClientError.Security.Unauthorized`
 **原因**：密码不匹配。`docker-compose.yml` 写死 `neo4j/testpassword`，
 `.env.example` 也是这个，但如果你之前用过 Neo4j 容器，data volume

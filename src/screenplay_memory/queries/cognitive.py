@@ -51,7 +51,8 @@ async def query_character_knowledge(
         if not _is_within_cutoff(e, cutoff):
             continue
         fact = getattr(e, "fact", None) or ""
-        if character_name not in fact:
+        witness = (getattr(e, "attributes", None) or {}).get("witness_scope") or []
+        if character_name not in witness:
             continue
 
         knows_facts.append(fact)

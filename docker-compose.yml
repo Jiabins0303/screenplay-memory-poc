@@ -1,7 +1,9 @@
 version: '3.8'
 services:
   neo4j:
-    image: neo4j:5.15-community
+    # 5.18+ 才有 vector.similarity.cosine() 函数,graphiti-core 依赖它
+    # 5.26 是 2026 年的 LTS
+    image: neo4j:5.26-community
     container_name: screenplay-neo4j
     ports:
       - "7474:7474"

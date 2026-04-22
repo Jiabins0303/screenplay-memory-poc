@@ -21,5 +21,7 @@ class PlotEvent(BaseModel):
     )
     importance: int = Field(
         default=3,
+        ge=1,
+        le=5,
         description="重要性 1-5。5=对剧情有重大影响，1=次要细节",
     )

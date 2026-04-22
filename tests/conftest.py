@@ -17,7 +17,7 @@ async def memory_client():
     try:
         yield client
     finally:
-        await client.clear()
+        # await client.clear()  # temporarily disabled to inspect storage in Neo4j Browser
         await client.close()
 
 
