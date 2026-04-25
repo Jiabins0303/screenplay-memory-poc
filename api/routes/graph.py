@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+import neo4j.time as n4t
 from fastapi import APIRouter, Depends
 
 from api.deps import ClientCache, get_cache, get_client
@@ -38,7 +41,7 @@ async def get_graph(
                 uuid=row["uuid"] or "",
                 name=row["name"],
                 labels=row["labels"] or [],
-                properties=_strip_embeddings(row["props"] or {}),
+                properties=_sanitize_props(row["props"] or {}),
             )
             async for row in node_result
             if row["uuid"]
@@ -63,7 +66,7 @@ async def get_graph(
                 source=row["src"] or "",
                 target=row["dst"] or "",
                 type=row["type"] or "",
-                properties=_strip_embeddings(row["props"] or {}),
+                properties=_sanitize_props(row["props"] or {}),
             )
             async for row in edge_result
             if row["src"] and row["dst"]
@@ -72,11 +75,32 @@ async def get_graph(
     return GraphDTO(nodes=nodes, edges=edges)
 
 
-def _strip_embeddings(props: dict) -> dict:
-    """Remove embedding vectors from serialised properties.
+def _sanitize_props(value: Any) -> Any:
+    """Drop embedding vectors and convert Neo4j temporal types to ISO strings.
 
-    Graphiti stores ``name_embedding`` / ``summary_embedding`` on nodes —
-    hundreds of floats. The frontend never needs them and shipping them
-    can easily 10× the response size.
+    Two problems we close here in one pass:
+
+    1. Graphiti stores ``*_embedding`` on nodes — hundreds of floats that
+       would 10× the response size. The frontend never reads them.
+    2. ``properties(n)`` surfaces ``created_at`` (and any date-typed edge
+       field) as ``neo4j.time.DateTime``, which Pydantic's JSON serializer
+       refuses with ``PydanticSerializationError``. Convert to ISO-8601 so
+       the whole response is JSON-safe without leaking driver types into
+       the wire contract.
+
+    Applied recursively so nested dicts/lists in Graphiti ``attributes``
+    are also handled.
     """
-    return {k: v for k, v in props.items() if not k.endswith("_embedding")}
+    if isinstance(value, dict):
+        return {
+            k: _sanitize_props(v)
+            for k, v in value.items()
+            if not k.endswith("_embedding")
+        }
+    if isinstance(value, list):
+        return [_sanitize_props(v) for v in value]
+    if isinstance(value, (n4t.DateTime, n4t.Date, n4t.Time)):
+        return value.to_native().isoformat()
+    if isinstance(value, n4t.Duration):
+        return value.iso_format()
+    return value

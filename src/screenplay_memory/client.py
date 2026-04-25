@@ -15,7 +15,7 @@ from datetime import datetime, timezone, timedelta
 from graphiti_core import Graphiti
 from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
 from graphiti_core.llm_client.config import LLMConfig
-from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
+from screenplay_memory.llm_client import SmartModelClient
 from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
 from graphiti_core.nodes import EpisodeType
 
@@ -84,6 +84,7 @@ class MemoryClient:
             model=s.chat_model,
             small_model=s.chat_small_model,
             base_url=s.openrouter_api_base,
+            temperature=0.2,
         )
         # max_tokens trade-off:
         # - Too high → OpenRouter 402 when the key's per-request credit
@@ -94,7 +95,7 @@ class MemoryClient:
         # 5000 is the empirical floor that still fits the extraction JSON;
         # bump to 8192 via LLM_MAX_TOKENS=8192 once the key has headroom.
         max_tokens = int(os.getenv("LLM_MAX_TOKENS", "5000"))
-        llm_client = OpenAIGenericClient(config=llm_config, max_tokens=max_tokens)
+        llm_client = SmartModelClient(config=llm_config, max_tokens=max_tokens)
         embedder = OpenAIEmbedder(
             config=OpenAIEmbedderConfig(
                 api_key=s.openrouter_api_key,
@@ -175,6 +176,26 @@ class MemoryClient:
                 limit=limit,
             )
             return [r["uuid"] async for r in result]
+
+    async def _is_scene_ingested(self, episode: int, scene: int) -> bool:
+        name = f"S{episode:02d}E{scene:02d}"
+        async with self._graphiti.driver.session() as sess:
+            result = await sess.run(
+                "MATCH (e:Episodic {name: $name, group_id: $gid}) RETURN count(e) AS c",
+                name=name, gid=self.project_id,
+            )
+            row = await result.single()
+            return (row["c"] if row else 0) > 0
+
+    async def _is_hl_ingested(self) -> bool:
+        hl_gid = f"{self.project_id}__hl"
+        async with self._graphiti.driver.session() as sess:
+            result = await sess.run(
+                "MATCH (e:Episodic {group_id: $gid}) RETURN count(e) AS c",
+                gid=hl_gid,
+            )
+            row = await result.single()
+            return (row["c"] if row else 0) > 0
 
     async def ingest(self, content: str, episode: int, scene: int) -> dict:
         """Ingest a screenplay chunk.

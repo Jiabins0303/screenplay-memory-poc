@@ -1,40 +1,98 @@
+// Ontology editor — "printer's manuscript" layout with dual-layer toggle,
+// expandable entity cards and edge cards.
+//
+// For a demo project we render the MOCK ontology and the Save button is
+// disabled; for a real project we load GET /ontology and PUT on save.
+// The design keeps field editing inline; this port preserves that.
+
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { Layer, OntologyEntitySpec, OntologyFieldSpec, OntologyResponse, OntologySpec } from "../types";
+import { DEMO_ONLY } from "../env";
 import { useUI } from "../store";
+import {
+  MOCK_ONTOLOGY_DETAIL,
+  MOCK_ONTOLOGY_HL,
+  MockOntology,
+  MockOntologyEntity,
+  MockOntologyField,
+  KIND_COLOR,
+} from "../mockdata";
+import type { Layer, OntologyResponse, OntologySpec } from "../types";
 
-const ALLOWED_TYPES = ["str", "int", "float", "bool", "list[str]", "list[int]"];
+// Convert backend spec shape to the mock-style used by the design components.
+function toMock(spec: OntologySpec): MockOntology {
+  const conv = (es: OntologySpec["entities"]): MockOntologyEntity[] =>
+    es.map((e) => ({
+      name: e.name,
+      desc: e.description || "",
+      fields: e.fields.map((f) => {
+        const isLiteral = typeof f.type !== "string" && (f.type as { kind?: string })?.kind === "literal";
+        const type = isLiteral
+          ? "literal"
+          : typeof f.type === "string"
+          ? f.type
+          : "str";
+        const vals =
+          isLiteral && typeof f.type !== "string"
+            ? (f.type as { values: (string | number | boolean)[] }).values.map(String)
+            : undefined;
+        return {
+          name: f.name,
+          type,
+          opt: !!f.optional,
+          note: f.description || undefined,
+          vals,
+        } as MockOntologyField;
+      }),
+    }));
+  return { entities: conv(spec.entities), edges: conv(spec.edges) };
+}
 
 export default function OntologyPage() {
-  const pid = useUI((s) => s.projectId);
+  const project = useUI((s) => s.project);
   const [layer, setLayer] = useState<Layer>("detail");
-  const [spec, setSpec] = useState<OntologySpec | null>(null);
-  const [source, setSource] = useState<"default" | "saved">("default");
-  const [saving, setSaving] = useState(false);
+  const [spec, setSpec] = useState<MockOntology | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const isDemo = DEMO_ONLY || !!project?.demo;
 
   useEffect(() => {
-    if (!pid) return;
-    setError(null);
+    if (!project) return;
+    if (isDemo) {
+      setSpec(layer === "detail" ? MOCK_ONTOLOGY_DETAIL : MOCK_ONTOLOGY_HL);
+      return;
+    }
     api
-      .get<OntologyResponse>(`/projects/${pid}/ontology?layer=${layer}`)
-      .then((r) => {
-        setSpec(r.spec);
-        setSource(r.source);
-      })
-      .catch((e) => setError(String(e)));
-  }, [pid, layer]);
+      .get<OntologyResponse>(`/projects/${project.id}/ontology?layer=${layer}`)
+      .then((r) => setSpec(toMock(r.spec)))
+      .catch((e) => {
+        setError(String(e));
+        setSpec(layer === "detail" ? MOCK_ONTOLOGY_DETAIL : MOCK_ONTOLOGY_HL);
+      });
+  }, [project, layer, isDemo]);
 
-  if (!pid) return <div className="p-8">先在「项目」页选一个项目。</div>;
-  if (!spec) return <div className="p-8 text-slate-500">加载中…</div>;
+  const layerInfo = {
+    detail: { title: "明细层", sub: "Detail Layer", note: "角色、场景、具体事件。按场次生成。" },
+    hl: { title: "摘要层", sub: "High-Level Layer", note: "节拍、弧线和主题。用于跨场分析。" },
+  }[layer];
+
+  const entities = spec?.entities ?? [];
+  const edges = spec?.edges ?? [];
+
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    setExpanded(new Set(entities.map((e) => e.name)));
+  }, [spec]);
 
   async function save() {
-    if (!pid || !spec) return;
+    if (!spec || !project || isDemo) return;
     setSaving(true);
     setError(null);
     try {
-      await api.put(`/projects/${pid}/ontology?layer=${layer}`, spec);
-      alert("已保存");
+      await api.put(`/projects/${project.id}/ontology?layer=${layer}`, {
+        entities: spec.entities.map(mockEntityToSpec),
+        edges: spec.edges.map(mockEntityToSpec),
+      });
     } catch (e) {
       setError(String(e));
     } finally {
@@ -42,99 +100,158 @@ export default function OntologyPage() {
     }
   }
 
-  const patchEntity = (idx: number, next: OntologyEntitySpec) => {
-    if (!spec) return;
-    const copy = { ...spec, entities: [...spec.entities] };
-    copy.entities[idx] = next;
-    setSpec(copy);
-  };
-
-  const addEntity = () => {
-    if (!spec) return;
-    setSpec({
-      ...spec,
-      entities: [
-        ...spec.entities,
-        { name: `Entity${spec.entities.length + 1}`, description: "", fields: [] },
-      ],
-    });
-  };
-
-  const removeEntity = (idx: number) => {
-    if (!spec) return;
-    setSpec({ ...spec, entities: spec.entities.filter((_, i) => i !== idx) });
-  };
-
   return (
-    <div className="p-6 max-w-5xl mx-auto h-full overflow-auto">
-      <div className="flex items-center gap-4 mb-5">
-        <h1 className="text-xl font-semibold">本体定义</h1>
-        <div className="text-xs text-slate-500">
-          {source === "saved" ? "已自定义" : "使用默认"}
+    <div className="swiss-page">
+      <div className="swiss-shell" style={{ maxWidth: 1040 }}>
+        <div className="swiss-heading">
+          <div className="swiss-number">02</div>
+          <div>
+            <h1 className="swiss-title">数据结构</h1>
+            <div className="swiss-copy">
+              配置实体、字段和关系类型，控制图谱抽取结构。
+            </div>
+          </div>
+          <div className="row" style={{ justifyContent: "flex-end" }}>
+            <LayerToggle layer={layer} onChange={setLayer} />
+            <button
+              className="btn primary"
+              style={{ marginLeft: 8 }}
+              onClick={save}
+              disabled={isDemo || saving}
+            >
+              {isDemo ? "示例 · 只读" : saving ? "保存中…" : "保存"}
+            </button>
+          </div>
         </div>
-        <div className="ml-auto flex gap-2 text-sm">
-          <LayerToggle layer={layer} onChange={setLayer} />
-          <button
-            className="bg-sky-600 hover:bg-sky-500 px-3 py-1 rounded"
-            disabled={saving}
-            onClick={save}
-          >
-            保存
-          </button>
+
+        <div
+          className="panel"
+          style={{
+            padding: 18,
+            marginBottom: 24,
+            display: "flex",
+            alignItems: "center",
+            gap: 16,
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 16, color: "var(--ink-900)", fontWeight: 700 }}>
+              {layerInfo.title}{" "}
+              <span className="tiny muted">
+                · {layerInfo.sub}
+              </span>
+            </div>
+            <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
+              {layerInfo.note}
+            </div>
+          </div>
+          <div style={{ flex: 1 }} />
+          <div className="tiny dim">
+            {entities.length} 实体 · {edges.length} 关系
+          </div>
         </div>
-      </div>
 
-      {error && (
-        <div className="text-red-400 text-xs mb-3 whitespace-pre-wrap">{error}</div>
-      )}
-      <div className="text-xs text-slate-500 mb-4">
-        保存前请确保该层还没有节点；有节点时后端会拒绝修改，需先清空项目。
-      </div>
-
-      <section>
-        <SectionHeader title="实体类型" onAdd={addEntity} />
-        {spec.entities.map((ent, i) => (
-          <EntityCard
-            key={i}
-            entry={ent}
-            onChange={(e) => patchEntity(i, e)}
-            onRemove={() => removeEntity(i)}
-          />
-        ))}
-      </section>
-
-      <section className="mt-6">
-        <SectionHeader
-          title="边类型"
-          onAdd={() =>
-            setSpec({
-              ...spec,
-              edges: [
-                ...spec.edges,
-                { name: `Edge${spec.edges.length + 1}`, description: "", fields: [] },
-              ],
-            })
-          }
-        />
-        {spec.edges.map((ent, i) => (
-          <EntityCard
-            key={i}
-            entry={ent}
-            onChange={(next) => {
-              const copy = { ...spec, edges: [...spec.edges] };
-              copy.edges[i] = next;
-              setSpec(copy);
+        {error && (
+          <div
+            className="panel"
+            style={{
+              padding: 12,
+              marginBottom: 16,
+              borderLeft: "3px solid var(--err)",
+              fontSize: 12.5,
+              color: "var(--cinnabar-400)",
             }}
-            onRemove={() =>
-              setSpec({
-                ...spec,
-                edges: spec.edges.filter((_, k) => k !== i),
-              })
-            }
-          />
-        ))}
-      </section>
+          >
+            {error}
+          </div>
+        )}
+
+        <Section title="实体类型" en="02A">
+          <div className="col stagger-in" style={{ gap: 10 }}>
+            {entities.map((ent, i) => (
+              <div key={ent.name} style={{ "--i": i } as React.CSSProperties}>
+                <EntityCard
+                  entity={ent}
+                  expanded={expanded.has(ent.name)}
+                  onToggle={() =>
+                    setExpanded((s) => {
+                      const n = new Set(s);
+                      if (n.has(ent.name)) n.delete(ent.name);
+                      else n.add(ent.name);
+                      return n;
+                    })
+                  }
+                />
+              </div>
+            ))}
+            <div style={{ "--i": entities.length } as React.CSSProperties}>
+              <AddButton label="新增实体类型" />
+            </div>
+          </div>
+        </Section>
+
+        <div style={{ height: 24 }} />
+
+        <Section title="关系类型" en="02B">
+          <div className="col stagger-in" style={{ gap: 10 }}>
+            {edges.map((e, i) => (
+              <div key={e.name} style={{ "--i": i + 2 } as React.CSSProperties}>
+                <EdgeCard edge={e} />
+              </div>
+            ))}
+            <div style={{ "--i": edges.length + 2 } as React.CSSProperties}>
+              <AddButton label="新增关系类型" />
+            </div>
+          </div>
+        </Section>
+      </div>
     </div>
+  );
+}
+
+function mockEntityToSpec(e: MockOntologyEntity): OntologySpec["entities"][number] {
+  return {
+    name: e.name,
+    description: e.desc,
+    fields: e.fields.map((f) => {
+      const type =
+        f.type === "literal" && f.vals
+          ? { kind: "literal" as const, values: f.vals }
+          : f.type;
+      return {
+        name: f.name,
+        type,
+        optional: f.opt,
+        description: f.note || "",
+      };
+    }),
+  };
+}
+
+function Section({
+  title,
+  en,
+  children,
+}: {
+  title: string;
+  en: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section>
+      <div
+        className="row"
+        style={{ marginBottom: 12, paddingBottom: 10, borderBottom: "1px solid var(--divider)" }}
+      >
+        <span className="mono" style={{ color: "#e4002b", fontWeight: 700 }}>
+          {en}
+        </span>
+        <span className="song" style={{ fontSize: 17, color: "var(--ink-800)", marginLeft: 2 }}>
+          {title}
+        </span>
+      </div>
+      {children}
+    </section>
   );
 }
 
@@ -146,177 +263,222 @@ function LayerToggle({
   onChange: (l: Layer) => void;
 }) {
   return (
-    <div className="bg-slate-900 rounded p-0.5 flex text-xs">
-      {(["detail", "hl"] as Layer[]).map((l) => (
+    <div
+      style={{
+        display: "inline-flex",
+        background: "var(--ink-100)",
+        borderRadius: 0,
+        padding: 2,
+        border: "1px solid var(--divider)",
+      }}
+    >
+      {[
+        { v: "detail" as Layer, l: "详细层" },
+        { v: "hl" as Layer, l: "节拍层" },
+      ].map((o) => (
         <button
-          key={l}
-          className={`px-3 py-1 rounded ${
-            layer === l ? "bg-sky-600 text-white" : "text-slate-300"
-          }`}
-          onClick={() => onChange(l)}
+          key={o.v}
+          onClick={() => onChange(o.v)}
+          className="song"
+          style={{
+            padding: "6px 16px",
+            fontSize: 13,
+            borderRadius: 0,
+            background: layer === o.v ? "var(--seal-500)" : "transparent",
+            color: layer === o.v ? "#fff" : "var(--ink-600)",
+          }}
         >
-          {l === "detail" ? "详细层" : "节拍层"}
+          {o.l}
         </button>
       ))}
     </div>
   );
 }
 
-function SectionHeader({ title, onAdd }: { title: string; onAdd: () => void }) {
-  return (
-    <div className="flex items-center mb-2">
-      <h2 className="font-medium">{title}</h2>
-      <button
-        className="ml-auto text-xs text-sky-400 hover:underline"
-        onClick={onAdd}
-      >
-        + 新增
-      </button>
-    </div>
-  );
-}
-
 function EntityCard({
-  entry,
-  onChange,
-  onRemove,
+  entity,
+  expanded,
+  onToggle,
 }: {
-  entry: OntologyEntitySpec;
-  onChange: (next: OntologyEntitySpec) => void;
-  onRemove: () => void;
+  entity: MockOntologyEntity;
+  expanded: boolean;
+  onToggle: () => void;
 }) {
-  const addField = () =>
-    onChange({
-      ...entry,
-      fields: [
-        ...entry.fields,
-        { name: `field${entry.fields.length + 1}`, type: "str", optional: true, description: "" },
-      ],
-    });
+  const colorVar = `var(${KIND_COLOR[entity.name] || "--char-500"})`;
   return (
-    <div className="border border-slate-800 rounded p-3 mb-3 bg-slate-900/40">
-      <div className="flex items-center gap-2 mb-2">
-        <input
-          className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-sm font-mono"
-          value={entry.name}
-          onChange={(e) => onChange({ ...entry, name: e.target.value })}
-        />
-        <input
-          className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-sm"
-          value={entry.description || ""}
-          placeholder="类型说明（会成为 LLM prompt 的一部分）"
-          onChange={(e) => onChange({ ...entry, description: e.target.value })}
-        />
-        <button
-          className="text-red-400 text-xs hover:underline"
-          onClick={onRemove}
-        >
-          删除
-        </button>
-      </div>
-
-      <div className="ml-2 space-y-1">
-        {entry.fields.map((f, i) => (
-          <FieldRow
-            key={i}
-            field={f}
-            onChange={(next) => {
-              const fields = [...entry.fields];
-              fields[i] = next;
-              onChange({ ...entry, fields });
-            }}
-            onRemove={() =>
-              onChange({ ...entry, fields: entry.fields.filter((_, k) => k !== i) })
-            }
-          />
-        ))}
-        <button
-          className="text-xs text-sky-400 hover:underline"
-          onClick={addField}
-        >
-          + 新增字段
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function FieldRow({
-  field,
-  onChange,
-  onRemove,
-}: {
-  field: OntologyFieldSpec;
-  onChange: (next: OntologyFieldSpec) => void;
-  onRemove: () => void;
-}) {
-  const typeString =
-    typeof field.type === "string" ? field.type : "literal";
-  return (
-    <div className="flex items-center gap-2 text-sm">
-      <input
-        className="w-32 bg-slate-950 border border-slate-700 rounded px-2 py-0.5 font-mono"
-        value={field.name}
-        onChange={(e) => onChange({ ...field, name: e.target.value })}
-      />
-      <select
-        className="bg-slate-950 border border-slate-700 rounded px-2 py-0.5"
-        value={typeString}
-        onChange={(e) => {
-          const v = e.target.value;
-          if (v === "literal") {
-            onChange({
-              ...field,
-              type: { kind: "literal", values: ["A", "B"] },
-            });
-          } else {
-            onChange({ ...field, type: v });
-          }
+    <div className="panel" style={{ overflow: "hidden" }}>
+      <div
+        onClick={onToggle}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 14,
+          padding: "14px 18px",
+          cursor: "pointer",
         }}
       >
-        {ALLOWED_TYPES.map((t) => (
-          <option key={t} value={t}>
-            {t}
-          </option>
-        ))}
-        <option value="literal">literal…</option>
-      </select>
-      {typeof field.type !== "string" && (
-        <input
-          className="w-40 bg-slate-950 border border-slate-700 rounded px-2 py-0.5"
-          value={field.type.values.join(",")}
-          placeholder="逗号分隔的枚举值"
-          onChange={(e) =>
-            onChange({
-              ...field,
-              type: {
-                kind: "literal",
-                values: e.target.value.split(",").map((v) => v.trim()).filter(Boolean),
-              },
-            })
-          }
+        <div
+          style={{
+            width: 10,
+            height: 10,
+            borderRadius: 0,
+            background: colorVar,
+          }}
         />
+        <div>
+          <div
+            className="mono"
+            style={{
+              fontSize: 13,
+              color: "var(--ink-800)",
+              fontWeight: 500,
+              letterSpacing: 0,
+            }}
+          >
+            {entity.name}
+          </div>
+          <div className="muted" style={{ fontSize: 12.5, marginTop: 1 }}>
+            {entity.desc}
+          </div>
+        </div>
+        <div style={{ flex: 1 }} />
+        <span className="chip mono">{entity.fields.length} 字段</span>
+        <span
+          className="muted"
+          style={{
+            fontSize: 12,
+            transform: expanded ? "rotate(90deg)" : "",
+            transition: "transform .2s",
+          }}
+        >
+          ›
+        </span>
+      </div>
+      {expanded && (
+        <div
+          style={{
+            background: "var(--ink-050)",
+            padding: "12px 18px 16px",
+            borderTop: "1px solid var(--hairline)",
+          }}
+        >
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "140px 120px 80px 1fr",
+              gap: 10,
+              paddingBottom: 6,
+              borderBottom: "1px solid var(--hairline)",
+            }}
+          >
+            <span className="tiny muted">字段</span>
+            <span className="tiny muted">类型</span>
+            <span className="tiny muted">必填</span>
+            <span className="tiny muted">说明</span>
+          </div>
+          {entity.fields.map((f) => (
+            <div
+              key={f.name}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "140px 120px 80px 1fr",
+                gap: 10,
+                padding: "8px 0",
+                alignItems: "center",
+                borderBottom: "1px solid var(--hairline)",
+              }}
+            >
+              <span className="mono" style={{ fontSize: 13, color: "var(--ink-800)" }}>
+                {f.name}
+              </span>
+              <span
+                className="mono tiny"
+                style={{
+                  color: f.type === "literal" ? "var(--seal-400)" : "var(--ink-600)",
+                }}
+              >
+                {f.type === "literal" && f.vals
+                  ? `{${f.vals.slice(0, 3).join(" | ")}${f.vals.length > 3 ? " …" : ""}}`
+                  : f.type}
+              </span>
+              <span
+                className="tiny"
+                style={{ color: f.opt ? "var(--ink-500)" : "var(--cinnabar-500)" }}
+              >
+                {f.opt ? "可选" : "必填"}
+              </span>
+              <span className="muted" style={{ fontSize: 12.5 }}>
+                {f.note || "—"}
+              </span>
+            </div>
+          ))}
+          <button
+            className="tiny"
+            style={{
+              color: "var(--seal-400)",
+              marginTop: 10,
+              letterSpacing: 0,
+            }}
+          >
+            新增字段
+          </button>
+        </div>
       )}
-      <label className="text-xs text-slate-400 flex items-center gap-1">
-        <input
-          type="checkbox"
-          checked={field.optional ?? false}
-          onChange={(e) => onChange({ ...field, optional: e.target.checked })}
-        />
-        可选
-      </label>
-      <input
-        className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-0.5"
-        value={field.description || ""}
-        placeholder="字段描述"
-        onChange={(e) => onChange({ ...field, description: e.target.value })}
-      />
-      <button
-        className="text-red-400 text-xs hover:underline"
-        onClick={onRemove}
-      >
-        ×
-      </button>
     </div>
+  );
+}
+
+function EdgeCard({ edge }: { edge: MockOntologyEntity }) {
+  return (
+    <div
+      className="panel"
+      style={{ padding: "12px 18px", display: "flex", alignItems: "center", gap: 14 }}
+    >
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--seal-400)" strokeWidth="1.6">
+        <circle cx="5" cy="12" r="2" />
+        <circle cx="19" cy="12" r="2" />
+        <path d="M7 12 H17" strokeDasharray="2 2" />
+        <path d="M15 9 L17 12 L15 15" />
+      </svg>
+      <div>
+        <div
+          className="mono"
+          style={{ fontSize: 13, color: "var(--ink-800)", letterSpacing: 0 }}
+        >
+          {edge.name}
+        </div>
+        <div className="muted" style={{ fontSize: 12.5, marginTop: 1 }}>
+          {edge.desc}
+        </div>
+      </div>
+      <div style={{ flex: 1 }} />
+      <span className="chip mono">{edge.fields.length} 字段</span>
+    </div>
+  );
+}
+
+function AddButton({ label }: { label: string }) {
+  return (
+    <button
+      style={{
+        padding: "10px 16px",
+        border: "1px dashed var(--divider-strong)",
+        borderRadius: 0,
+        color: "var(--ink-500)",
+        background: "transparent",
+        textAlign: "left",
+        transition: "color .15s, border-color .15s",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.color = "var(--seal-400)";
+        e.currentTarget.style.borderColor = "var(--seal-500)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.color = "";
+        e.currentTarget.style.borderColor = "";
+      }}
+    >
+      {label}
+    </button>
   );
 }

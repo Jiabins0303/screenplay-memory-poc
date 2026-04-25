@@ -158,6 +158,31 @@ async def test_graph_read(api_client):
 
 
 @pytest.mark.asyncio
+async def test_graph_read_handles_neo4j_datetime(api_client):
+    """Regression: Graphiti nodes ship with created_at as neo4j.time.DateTime,
+    which Pydantic v2 can't serialize. The endpoint must convert temporals
+    to ISO strings so the response doesn't 500."""
+    await api_client.post("/projects", json={"project_id": PROJECT_ID})
+    client = await app.state.client_cache.get(PROJECT_ID)
+    async with client._graphiti.driver.session() as sess:
+        await sess.run(
+            """
+            CREATE (n:Character {
+              uuid: 'dt1', group_id: $gid, name: '时间角色',
+              created_at: datetime('2026-01-01T00:00:00Z')
+            })
+            """,
+            gid=PROJECT_ID,
+        )
+
+    r = await api_client.get(f"/projects/{PROJECT_ID}/graph?layer=detail")
+    assert r.status_code == 200, r.text
+    node = next(n for n in r.json()["nodes"] if n["uuid"] == "dt1")
+    assert isinstance(node["properties"]["created_at"], str)
+    assert node["properties"]["created_at"].startswith("2026-01-01")
+
+
+@pytest.mark.asyncio
 async def test_patch_node_rename(api_client):
     await api_client.post("/projects", json={"project_id": PROJECT_ID})
     client = await app.state.client_cache.get(PROJECT_ID)
@@ -240,3 +265,94 @@ async def test_query_search_empty_returns_400(api_client):
         json={"mode": "search", "question": ""},
     )
     assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_boundary_requires_characters(api_client):
+    """Boundary endpoint rejects an empty project cleanly rather than
+    returning an empty matrix the frontend has to special-case."""
+    await api_client.post("/projects", json={"project_id": PROJECT_ID})
+    r = await api_client.get(f"/projects/{PROJECT_ID}/boundary")
+    assert r.status_code == 404
+    assert "Character" in r.text
+
+
+@pytest.mark.asyncio
+async def test_boundary_requires_beats(api_client):
+    """Characters without beats still fail cleanly — the Boundary view
+    assumes both layers exist."""
+    await api_client.post("/projects", json={"project_id": PROJECT_ID})
+    client = await app.state.client_cache.get(PROJECT_ID)
+    await _seed(
+        client,
+        [{"uuid": "c1", "name": "测试人", "label": "Character"}],
+    )
+    r = await api_client.get(f"/projects/{PROJECT_ID}/boundary")
+    assert r.status_code == 404
+    assert "Beat" in r.text
+
+
+@pytest.mark.asyncio
+async def test_boundary_parses_chinese_scene_range(api_client):
+    """Regression: LLM sometimes writes scene_range_end as '全剧第1集第1场'
+    instead of '1-1'. The parser must handle both formats."""
+    await api_client.post("/projects", json={"project_id": PROJECT_ID})
+    client = await app.state.client_cache.get(PROJECT_ID)
+    await _seed(
+        client,
+        [{"uuid": "c1", "name": "测试人", "label": "Character"}],
+    )
+    async with client._graphiti.driver.session() as sess:
+        await sess.run(
+            """
+            CREATE (b:Beat {
+              uuid: 'bt1', group_id: $hl_gid, name: '开场钩子',
+              beat_type: 'Hook', tension_level: 5,
+              scene_range_start: '全剧第1集第1场',
+              scene_range_end: '全剧第1集第1场'
+            })
+            """,
+            hl_gid=f"{PROJECT_ID}__hl",
+        )
+    r = await api_client.get(f"/projects/{PROJECT_ID}/boundary")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["beats"]) == 1
+    assert body["beats"][0]["episode"] == 1
+
+
+# --- Ingest cache detection -------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_is_scene_ingested_returns_false_when_empty(api_client):
+    await api_client.post("/projects", json={"project_id": PROJECT_ID})
+    client = await app.state.client_cache.get(PROJECT_ID)
+    assert not await client._is_scene_ingested(1, 1)
+
+
+@pytest.mark.asyncio
+async def test_is_scene_ingested_returns_true_after_seeding(api_client):
+    """Seeding an Episodic node simulates a completed ingest."""
+    await api_client.post("/projects", json={"project_id": PROJECT_ID})
+    client = await app.state.client_cache.get(PROJECT_ID)
+    async with client._graphiti.driver.session() as sess:
+        await sess.run(
+            "CREATE (:Episodic {name: 'S01E01', group_id: $gid, uuid: 'ep1'})",
+            gid=PROJECT_ID,
+        )
+    assert await client._is_scene_ingested(1, 1)
+    assert not await client._is_scene_ingested(1, 2)
+
+
+@pytest.mark.asyncio
+async def test_is_hl_ingested(api_client):
+    await api_client.post("/projects", json={"project_id": PROJECT_ID})
+    client = await app.state.client_cache.get(PROJECT_ID)
+    assert not await client._is_hl_ingested()
+    async with client._graphiti.driver.session() as sess:
+        await sess.run(
+            "CREATE (:Episodic {name: 'HL__test', group_id: $gid, uuid: 'hl1'})",
+            gid=f"{PROJECT_ID}__hl",
+        )
+    assert await client._is_hl_ingested()

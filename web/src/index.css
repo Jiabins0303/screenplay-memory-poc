@@ -1,11 +1,6 @@
+/* Tailwind is kept only as a fallback utility layer. The design system
+ * drives visuals via tokens.css + inline styles; Tailwind directives stay
+ * so existing utility classes in any stray place still compile. */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-html, body, #root {
-  height: 100%;
-}
-
-body {
-  margin: 0;
-}

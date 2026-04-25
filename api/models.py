@@ -71,6 +71,10 @@ class IngestRequest(BaseModel):
         default=True,
         description="Also run the high-level beat extraction after detail ingest.",
     )
+    force: bool = Field(
+        default=False,
+        description="Skip cache check and re-extract all scenes.",
+    )
 
 
 # --- Graph / edits ---------------------------------------------------------

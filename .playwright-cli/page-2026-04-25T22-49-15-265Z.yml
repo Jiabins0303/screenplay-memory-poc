@@ -1,0 +1,72 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: "01"
+      - generic [ref=e7]:
+        - generic [ref=e8]: Screenplay Memory
+        - generic [ref=e9]: 剧本知识管理
+    - navigation [ref=e10]:
+      - button "01 项目" [ref=e11] [cursor=pointer]:
+        - generic [ref=e12]: "01"
+        - generic [ref=e13]: 项目
+      - button "02 结构" [ref=e14] [cursor=pointer]:
+        - generic [ref=e15]: "02"
+        - generic [ref=e16]: 结构
+      - button "03 导入" [ref=e17] [cursor=pointer]:
+        - generic [ref=e18]: "03"
+        - generic [ref=e19]: 导入
+      - button "04 图谱" [ref=e20] [cursor=pointer]:
+        - generic [ref=e21]: "04"
+        - generic [ref=e22]: 图谱
+      - button "05 知识边界" [ref=e23] [cursor=pointer]:
+        - generic [ref=e24]: "05"
+        - generic [ref=e25]: 知识边界
+    - generic [ref=e121]:
+      - generic [ref=e122]: 当前项目
+      - generic [ref=e123]: 回响
+      - generic [ref=e124]: echoes-2026
+      - generic [ref=e125]: 静态演示
+  - main [ref=e27]:
+    - generic [ref=e126]:
+      - complementary [ref=e127]:
+        - generic [ref=e128]:
+          - generic [ref=e129]: 筛选
+          - generic [ref=e130]:
+            - button "场景 12" [ref=e131] [cursor=pointer]:
+              - generic [ref=e133]: 场景
+              - generic [ref=e134]: "12"
+            - button "节拍 12" [ref=e135] [cursor=pointer]:
+              - generic [ref=e137]: 节拍
+              - generic [ref=e138]: "12"
+            - button "角色 6" [ref=e139] [cursor=pointer]:
+              - generic [ref=e141]: 角色
+              - generic [ref=e142]: "6"
+            - button "主题 2" [ref=e143] [cursor=pointer]:
+              - generic [ref=e145]: 主题
+              - generic [ref=e146]: "2"
+            - button "弧光 1" [ref=e147] [cursor=pointer]:
+              - generic [ref=e149]: 弧光
+              - generic [ref=e150]: "1"
+        - generic [ref=e151]:
+          - generic [ref=e152]: 关系类型
+          - generic [ref=e153]:
+            - generic [ref=e154]:
+              - img [ref=e155]
+              - generic [ref=e156]: KNOWS · 认知边
+            - generic [ref=e157]:
+              - img [ref=e158]
+              - generic [ref=e159]: PRESENT_IN · 出场
+            - generic [ref=e160]:
+              - img [ref=e161]
+              - generic [ref=e162]: FOLLOWS · 时序
+        - button "重新加载" [ref=e164] [cursor=pointer]
+      - generic [ref=e165]:
+        - generic [ref=e167]:
+          - generic: 04A详细图谱
+          - generic: 18 节点 · 25 关系
+        - generic [ref=e170]:
+          - generic: 04B高层图谱
+          - generic: 15 节点 · 19 关系
+  - button "智能查询" [ref=e172] [cursor=pointer]:
+    - img [ref=e173]
+    - text: 智能查询

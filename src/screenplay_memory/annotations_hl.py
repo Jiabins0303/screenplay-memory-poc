@@ -12,27 +12,32 @@ out in single-layer queries.
 
 from __future__ import annotations
 
+import re
 from typing import Any
+
+_CHINESE_SCENE_RE = re.compile(r"第(\d+)集第(\d+)场")
 
 
 def _parse_scene_ref(ref: str | None) -> tuple[int, int] | None:
     """Parse "episode-scene" into ``(int, int)``; return ``None`` on junk.
 
-    Accepts extra whitespace. Rejects negatives and non-numeric tokens.
+    Accepts "1-2" format and Chinese format like "全剧第1集第1场".
     """
     if not ref:
         return None
-    parts = ref.strip().split("-")
-    if len(parts) != 2:
-        return None
-    try:
-        ep = int(parts[0])
-        sc = int(parts[1])
-    except ValueError:
-        return None
-    if ep < 0 or sc < 0:
-        return None
-    return ep, sc
+    ref = ref.strip()
+    parts = ref.split("-")
+    if len(parts) == 2:
+        try:
+            ep, sc = int(parts[0]), int(parts[1])
+            if ep >= 0 and sc >= 0:
+                return ep, sc
+        except ValueError:
+            pass
+    m = _CHINESE_SCENE_RE.search(ref)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    return None
 
 
 async def attach_beats_to_scenes(graphiti: Any, project_id: str) -> dict:

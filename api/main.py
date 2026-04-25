@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.deps import ClientCache
-from api.routes import edits, graph, ingest, ontology, projects, query
+from api.routes import boundary, edits, graph, ingest, ontology, projects, query
 
 
 @asynccontextmanager
@@ -50,6 +50,7 @@ app.include_router(ingest.router)
 app.include_router(graph.router)
 app.include_router(edits.router)
 app.include_router(query.router)
+app.include_router(boundary.router)
 
 
 @app.get("/healthz")

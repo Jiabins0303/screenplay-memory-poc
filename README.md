@@ -34,6 +34,26 @@
 
 推荐 macOS / Linux。Windows 用户建议在 WSL2 里跑。
 
+## 最简静态演示版
+
+如果只是给投资人、同事或远程评审看交互体验，**不需要 Docker / Neo4j / OpenRouter Key**。前端有一套内置示例数据，可以编译成纯静态站点：
+
+```bash
+cd web
+pnpm install
+pnpm build:demo
+pnpm preview
+```
+
+`pnpm build:demo` 会设置 `VITE_DEMO_ONLY=true`，生成的 `web/dist/` 可以直接部署到 GitHub Pages、Cloudflare Pages、Tencent EdgeOne Pages 等静态托管平台。静态演示版会：
+
+- 展示示例项目、双层图谱、本体定义、认知边界矩阵和对话查询示例
+- 模拟剧本导入进度
+- 隐藏后端设置、新建真实项目和写入型编辑
+- 不发起任何 FastAPI / Neo4j / OpenRouter 请求
+
+真实抽取、真实查询和节点编辑仍然走下面的 Docker 后端流程。
+
 ---
 
 ## 详细运行步骤

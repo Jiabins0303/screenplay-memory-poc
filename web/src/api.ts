@@ -2,6 +2,7 @@
 // Base URL: VITE_API_BASE at build time OR localStorage.apiBase at runtime.
 
 import { fetchEventSource } from "@microsoft/fetch-event-source";
+import { DEMO_ONLY } from "./env";
 
 const BUILD_TIME_BASE = (import.meta.env.VITE_API_BASE as string | undefined) || "";
 
@@ -24,6 +25,9 @@ async function request<T>(
   path: string,
   body?: unknown,
 ): Promise<T> {
+  if (DEMO_ONLY) {
+    throw new Error("当前是静态演示版本，未连接后端。");
+  }
   const res = await fetch(`${apiBase()}${path}`, {
     method,
     headers: body ? { "Content-Type": "application/json" } : undefined,
@@ -57,6 +61,9 @@ export async function streamIngest(
   onEvent: (ev: IngestEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
+  if (DEMO_ONLY) {
+    throw new Error("当前是静态演示版本，未连接后端。");
+  }
   await fetchEventSource(`${apiBase()}/projects/${projectId}/ingest`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
