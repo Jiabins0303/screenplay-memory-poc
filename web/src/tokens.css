@@ -31,6 +31,15 @@
   --arc-500: #a7a7ad;
   --theme-500: #1d1d20;
 
+  --ident-500: #e88290;
+  --family-500: #9b6f3a;
+  --org-500: #3a5f9b;
+  --loc-500: #3a8b4f;
+  --item-500: #d4a017;
+  --mis-500: #7e3a9b;
+  --secret-500: #3a1e5e;
+  --trope-500: #e6c870;
+
   --ok: #050505;
   --warn: #6f6f76;
   --err: #e4002b;
@@ -51,6 +60,19 @@
   --shadow-panel: none;
   --shadow-float: 0 20px 50px rgba(5, 5, 5, 0.18);
   --density: 1;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ident-500: #f0a3ad;
+    --family-500: #b88f53;
+    --org-500: #5a82c5;
+    --loc-500: #5fad7a;
+    --item-500: #e8b945;
+    --mis-500: #a563c7;
+    --secret-500: #5a3680;
+    --trope-500: #f5e094;
+  }
 }
 
 html, body, #root {
