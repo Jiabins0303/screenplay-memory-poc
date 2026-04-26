@@ -224,6 +224,20 @@ class MemoryClient:
             edge_types=self._edge_types,
             previous_episode_uuids=prior_episodes,
         )
+        # Tag this Episodic with episode/scene metadata so the inverse-index
+        # scene_index module can link it back to the extracted Scene node.
+        async with self._graphiti.driver.session() as sess:
+            await sess.run(
+                """
+                MATCH (e:Episodic)
+                WHERE e.group_id=$gid AND e.reference_time=$rt
+                SET e.episode_num=$ep, e.scene_num=$sc
+                """,
+                gid=self.project_id,
+                rt=ref_time,
+                ep=episode,
+                sc=scene,
+            )
         # Use the *raw* content for negation detection, not the coreference-
         # resolved body. When a new character (e.g. 周雅静) first appears,
         # coreference can mis-bind pronouns to already-known characters,
