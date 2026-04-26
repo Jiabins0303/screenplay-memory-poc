@@ -142,10 +142,32 @@ def test_beat_has_audience_emotion():
     assert "audience_emotion" in cls.model_fields
 
 
+def test_audience_emotion_literal_complete():
+    cls = HL_ENTITY_TYPES["Beat"]
+    field = cls.model_fields["audience_emotion"]
+    assert get_origin(field.annotation) is Literal
+    assert set(get_args(field.annotation)) == {
+        "thrill", "satisfaction", "shock", "anger",
+        "sweetness", "tension", "tear", "other",
+    }
+    assert field.default == "other"
+
+
 def test_trope_required_fields():
     cls = HL_ENTITY_TYPES["Trope"]
     for f in ("trope_name", "trope_category", "popularity_score"):
         assert f in cls.model_fields
+
+
+def test_trope_popularity_score_bounds():
+    from pydantic import ValidationError
+    cls = HL_ENTITY_TYPES["Trope"]
+    cls(trope_name="霸总人设", popularity_score=10)  # ok
+    cls(trope_name="霸总人设", popularity_score=1)   # ok
+    with pytest.raises(ValidationError):
+        cls(trope_name="霸总人设", popularity_score=11)
+    with pytest.raises(ValidationError):
+        cls(trope_name="霸总人设", popularity_score=0)
 
 
 def test_scene_property_names_pinned_for_cross_module_contract():

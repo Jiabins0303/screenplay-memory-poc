@@ -12,30 +12,42 @@ BeatType = Literal[
     "Midpoint",
     "Climax",
     "Resolution",
+    "CliffHanger",
+    "FacePlay",
+    "Twist",
+    "PayoffMoment",
 ]
 
 
 class Beat(BaseModel):
     """叙事节拍 —— 全剧层面的结构单元。
 
-    一个节拍覆盖一段连续的场次，承载一个重要的叙事功能（吸引注意、
-    引发主线、升温冲突、逆转、高潮、收束）。一个剧本每种类型最多
-    出现一个节拍；如果某个节拍在剧本里不存在（常见于短剧），
-    宁可不抽取，也不要拼凑。
+    一个节拍覆盖一段连续场次，承载一个重要的叙事功能。短剧爆款常出现
+    CliffHanger / FacePlay / Twist / PayoffMoment 这 4 种节拍，密度比传统
+    长剧高得多 —— 抽取时不要漏。
+
+    宁可不抽，也不要拼凑：如果某种节拍在剧本里不存在，就不要硬安排。
 
     Examples:
         - 开场李静和张伟争吵 → Beat(beat_type="Hook")
-        - 领养身世被揭露 → Beat(beat_type="IncitingIncident")
+        - 集末"她竟然是苏家二小姐?" 镜头一黑 → Beat(beat_type="CliffHanger")
+        - 受气包当众反击渣前男友 → Beat(beat_type="FacePlay")
+        - 误会被揭穿 → Beat(beat_type="Twist")
+        - 男主当众宣布女主是他妻子 → Beat(beat_type="PayoffMoment")
     """
 
     beat_type: BeatType = Field(
         description=(
-            "节拍类型。Hook=开场钩子(抓住观众的首个冲突/悬念)；"
-            "IncitingIncident=引发事件(打破主角现状的关键事件)；"
+            "Hook=开场钩子(抓住观众的首个冲突/悬念)；"
+            "IncitingIncident=引发事件(打破主角现状)；"
             "RisingAction=主线推进(冲突升级)；"
             "Midpoint=中点逆转(剧情方向扭转)；"
             "Climax=高潮(主要冲突的决定性对抗)；"
-            "Resolution=收束(结局与余韵)"
+            "Resolution=收束(结局与余韵)；"
+            "CliffHanger=集末悬念(每集末尾留钩)；"
+            "FacePlay=打脸时刻(受气包翻身/反派吃瘪)；"
+            "Twist=反转(误会被揭穿/身份大白等)；"
+            "PayoffMoment=爽点高潮(观众情绪峰值)"
         ),
     )
     beat_summary: str = Field(
@@ -59,4 +71,15 @@ class Beat(BaseModel):
     involved_characters: list[str] = Field(
         default_factory=list,
         description="该节拍中出现的关键角色中文名列表（与详细层 Character 节点同名）。",
+    )
+    audience_emotion: Literal[
+        "thrill", "satisfaction", "shock", "anger",
+        "sweetness", "tension", "tear", "other",
+    ] = Field(
+        default="other",
+        description=(
+            "此节拍引发的主导观众情绪：thrill=爽/刺激；satisfaction=满足/解气；"
+            "shock=震惊；anger=愤怒/憋屈；sweetness=甜蜜/糖；tension=紧张；"
+            "tear=泪点；other=其他"
+        ),
     )
