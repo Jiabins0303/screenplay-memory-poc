@@ -21,12 +21,20 @@ CHINESE_EXTRACTION_INSTRUCTIONS = """\
    字段：role_type / gender / status_tags
    例：'厉北辰走进办公室' → Character(name='厉北辰', role_type='protagonist', gender='male')
 
-2. **Identity** — 角色的某一个身份/马甲/真实身份。一个角色可有多个 Identity。
-   字段：persona_label / is_real / associated_skills
-   例：'苏念表面是普通会计，真实身份是苏家二小姐'
+2. **Identity** — 角色的身份/马甲/职业头衔. **必抽** —— 任何描述某角色"身份是X"、"X的身份"、"在X集团做Y"、"是Y家族的Z"、"自称X"、"原本是X"、"真实身份是X" 都必须抽 Identity 节点. 一个 Character 通常有 1-3 个 Identity (公开身份 + 真实身份).
+   字段: persona_label (必填, 一个简短的身份标签) / is_real (False=马甲/对外身份, True=真实身份) / associated_skills (可选)
+
+   抽取触发词 (出现任一就必须抽): 身份, 马甲, 总裁, 总监, 经理, 秘书, 会计, 律师, 医生, 千金, 少爷, 二小姐, 大小姐, 长子, 长女, 少帅, 太太, 夫人, 家主, 董事长, 老板, 教授, 学生, 警察, 军官, 前任未婚妻, 现任未婚妻, 前男友, 前女友.
+
+   例 A: '厉北辰是厉氏集团总裁' → Identity(persona_label='厉氏集团总裁', is_real=True)
+   例 B: '苏念表面是普通会计, 真实身份是苏家二小姐'
        → Identity(persona_label='厉氏集团会计', is_real=False)
        → Identity(persona_label='苏家二小姐', is_real=True, associated_skills=['医术'])
-   注: 每个 Identity 节点必须额外抽一条 ScreenplayRelation(Character --IS_PERSONA_OF--> Identity) 边, 否则会孤立。
+   例 C: '林婉婉是林氏千金, 也是厉北辰的前任未婚妻'
+       → Identity(persona_label='林氏集团千金', is_real=True)
+       → Identity(persona_label='厉北辰的前任未婚妻', is_real=True)
+
+   **每个 Identity 必须配一条 ScreenplayRelation 边 (relation_type=IS_PERSONA_OF), 从 Character 指向 Identity, 否则 Identity 节点会孤立.**
 
 3. **Family** — 有名字的家族单元（厉家/苏家）。临时小队不抽。
    字段：family_name / family_alignment / influence_level
@@ -55,8 +63,12 @@ CHINESE_EXTRACTION_INSTRUCTIONS = """\
    例：'苏念真实身份是苏家二小姐'
        → Secret(secret_content='苏念是苏家二小姐', secret_type='identity')
 
-9. **Scene** — 场次。字段: episode_number / scene_number / location / time_of_day
-   从场次头 '[本段为第X集第Y场]' 抽 episode_number / scene_number; location 抓场次头里的地点描述。
+9. **Scene** — 场次实体, **本段开头一定有, 必抽 1 个**. 文本开头的标记 `[本段为第X集第Y场]` 就是 Scene 的来源.
+   字段: episode_number (来自'第X集'的X) / scene_number (来自'第Y场'的Y) / location / time_of_day
+   location 抓 '场景: XX' 里的 XX (如 '厉总办公室'); time_of_day 抓 '时间: XX' (上午/下午/夜 → morning/afternoon/night).
+
+   例: 文本以 '[本段为第3集第2场]\n场景: 凯悦酒店 / 时间: 夜' 开头
+       → Scene(episode_number=3, scene_number=2, location='凯悦酒店', time_of_day='night')
 
 10. **PlotEvent** — 关键剧情事件。字段: event_summary (≤60 字) / event_type
     event_type ∈ {confrontation, revelation, decision, transition, emotional_peak, other}

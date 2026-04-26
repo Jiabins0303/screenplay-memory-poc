@@ -32,9 +32,12 @@ async def fixture_graph(driver):
             CREATE (e2:Episodic {uuid:'e2', group_id:$gid, episode_num:1, scene_num:2})
             CREATE (s1:Scene   {uuid:'s1', group_id:$gid, episode_number:1, scene_number:1, name:'第1集第1场'})
             CREATE (s2:Scene   {uuid:'s2', group_id:$gid, episode_number:1, scene_number:2, name:'第1集第2场'})
-            CREATE (c1:Character {uuid:'c1', group_id:$gid, name:'苏念', episodes:['e1','e2']})
-            CREATE (c2:Character {uuid:'c2', group_id:$gid, name:'厉北辰', episodes:['e1']})
-            CREATE (c1)-[r:KNOWS {uuid:'r1', group_id:$gid, episodes:['e1']}]->(c2)
+            CREATE (c1:Character {uuid:'c1', group_id:$gid, name:'苏念'})
+            CREATE (c2:Character {uuid:'c2', group_id:$gid, name:'厉北辰'})
+            CREATE (e1)-[:MENTIONS]->(c1)
+            CREATE (e2)-[:MENTIONS]->(c1)
+            CREATE (e1)-[:MENTIONS]->(c2)
+            CREATE (c1)-[r1:KNOWS {uuid:'r1', group_id:$gid, episodes:['e1']}]->(c2)
             """,
             gid=gid,
         )

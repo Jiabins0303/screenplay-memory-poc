@@ -226,15 +226,18 @@ class MemoryClient:
         )
         # Tag this Episodic with episode/scene metadata so the inverse-index
         # scene_index module can link it back to the extracted Scene node.
+        # Match on name (S{ep}E{sc}) since Graphiti stores reference_time as
+        # `valid_at` with driver-side datetime coercion that breaks equality.
+        episodic_name = f"S{episode:02d}E{scene:02d}"
         async with self._graphiti.driver.session() as sess:
             await sess.run(
                 """
                 MATCH (e:Episodic)
-                WHERE e.group_id=$gid AND e.reference_time=$rt
+                WHERE e.group_id=$gid AND e.name=$name
                 SET e.episode_num=$ep, e.scene_num=$sc
                 """,
                 gid=self.project_id,
-                rt=ref_time,
+                name=episodic_name,
                 ep=episode,
                 sc=scene,
             )
