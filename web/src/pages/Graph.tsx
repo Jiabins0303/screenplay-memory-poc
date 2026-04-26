@@ -1,5 +1,11 @@
 // Graph page — dual 3D panels (detail above, beats below), filter rail on
-// the left, node inspector on the right when a node is selected.
+// the left, node OR edge inspector on the right when a selection exists.
+//
+// Selection rule: at most one of {selectedDetail, selectedHl,
+// selectedDetailEdge, selectedHlEdge} is non-null at any time. Picking a node
+// clears all edge selections (and the other panel's node selection); picking
+// an edge clears all node selections. EdgeInspector wins over NodeInspector
+// in render priority — but mutual exclusivity means we never see both.
 //
 // For demo projects we generate a small graph from the mock data so users
 // who haven't ingested anything still see a populated view. Real projects
@@ -8,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { DEMO_ONLY } from "../env";
-import type { GraphDTO, NodeDTO } from "../types";
+import type { EdgeDTO, GraphDTO, NodeDTO } from "../types";
 import { useUI } from "../store";
 import {
   MOCK_BEATS,
@@ -18,6 +24,7 @@ import {
 import ForceGraphPanel from "../components/ForceGraphPanel";
 import FilterRail from "../components/FilterPanel";
 import NodeInspector from "../components/NodeInspector";
+import EdgeInspector from "../components/EdgeInspector";
 
 function buildMockDetailGraph(): GraphDTO {
   const nodes: NodeDTO[] = [];
@@ -98,6 +105,8 @@ export default function GraphPage() {
   const [hl, setHl] = useState<GraphDTO>({ nodes: [], edges: [] });
   const [selectedDetail, setSelectedDetail] = useState<string | null>(null);
   const [selectedHl, setSelectedHl] = useState<string | null>(null);
+  const [selectedDetailEdge, setSelectedDetailEdge] = useState<string | null>(null);
+  const [selectedHlEdge, setSelectedHlEdge] = useState<string | null>(null);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
@@ -131,12 +140,26 @@ export default function GraphPage() {
   );
   const filteredHl = useMemo(() => filterGraph(hl, hidden), [hl, hidden]);
 
+  // At most one of these resolves; mutual exclusivity is enforced by the
+  // setters below (selecting a node clears all edge state and vice versa).
   const selectedNode: NodeDTO | null = useMemo(() => {
     if (selectedDetail)
       return detail.nodes.find((n) => n.uuid === selectedDetail) ?? null;
     if (selectedHl) return hl.nodes.find((n) => n.uuid === selectedHl) ?? null;
     return null;
   }, [selectedDetail, selectedHl, detail, hl]);
+
+  const selectedEdge: EdgeDTO | null = useMemo(() => {
+    if (selectedDetailEdge)
+      return detail.edges.find((e) => e.uuid === selectedDetailEdge) ?? null;
+    if (selectedHlEdge)
+      return hl.edges.find((e) => e.uuid === selectedHlEdge) ?? null;
+    return null;
+  }, [selectedDetailEdge, selectedHlEdge, detail, hl]);
+
+  const selectedFromDetail =
+    selectedDetail !== null || selectedDetailEdge !== null;
+  const inspectorGraph = selectedFromDetail ? filteredDetail : filteredHl;
 
   if (!project) {
     return <div style={{ padding: 40, color: "var(--ink-500)" }}>先选择或新建项目。</div>;
@@ -151,11 +174,61 @@ export default function GraphPage() {
     });
   }
 
+  // Selection helpers — every entry point goes through these so the
+  // mutual-exclusivity invariant is enforced in one place.
+  function selectDetailNode(uuid: string | null) {
+    setSelectedDetail(uuid);
+    if (uuid !== null) {
+      setSelectedHl(null);
+      setSelectedDetailEdge(null);
+      setSelectedHlEdge(null);
+    }
+  }
+  function selectHlNode(uuid: string | null) {
+    setSelectedHl(uuid);
+    if (uuid !== null) {
+      setSelectedDetail(null);
+      setSelectedDetailEdge(null);
+      setSelectedHlEdge(null);
+    }
+  }
+  function selectDetailEdge(uuid: string | null) {
+    setSelectedDetailEdge(uuid);
+    if (uuid !== null) {
+      setSelectedDetail(null);
+      setSelectedHl(null);
+      setSelectedHlEdge(null);
+    }
+  }
+  function selectHlEdge(uuid: string | null) {
+    setSelectedHlEdge(uuid);
+    if (uuid !== null) {
+      setSelectedDetail(null);
+      setSelectedHl(null);
+      setSelectedDetailEdge(null);
+    }
+  }
+  function clearAllSelection() {
+    setSelectedDetail(null);
+    setSelectedHl(null);
+    setSelectedDetailEdge(null);
+    setSelectedHlEdge(null);
+  }
+
+  // Neighbor / endpoint pivots from the inspector. They land on a node in
+  // whichever panel currently owns the inspector context.
+  function pivotToNode(uuid: string) {
+    if (selectedFromDetail) selectDetailNode(uuid);
+    else selectHlNode(uuid);
+  }
+
+  const showInspector = selectedNode || selectedEdge;
+
   return (
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "188px 1fr" + (selectedNode ? " 320px" : ""),
+        gridTemplateColumns: "188px 1fr" + (showInspector ? " 320px" : ""),
         height: "100%",
         minHeight: 0,
       }}
@@ -178,10 +251,9 @@ export default function GraphPage() {
           <ForceGraphPanel
             graph={filteredDetail}
             selectedUuid={selectedDetail}
-            onSelect={(u) => {
-              setSelectedDetail(u);
-              setSelectedHl(null);
-            }}
+            onSelect={selectDetailNode}
+            selectedEdgeUuid={selectedDetailEdge}
+            onSelectEdge={selectDetailEdge}
             title="详细图谱"
             inkStyle={false}
           />
@@ -190,28 +262,35 @@ export default function GraphPage() {
           <ForceGraphPanel
             graph={filteredHl}
             selectedUuid={selectedHl}
-            onSelect={(u) => {
-              setSelectedHl(u);
-              setSelectedDetail(null);
-            }}
+            onSelect={selectHlNode}
+            selectedEdgeUuid={selectedHlEdge}
+            onSelectEdge={selectHlEdge}
             title="高层图谱"
             inkStyle={false}
           />
         </div>
       </div>
-      {selectedNode && (
+      {selectedEdge ? (
+        <EdgeInspector
+          projectId={project.id}
+          demo={DEMO_ONLY || !!project.demo}
+          edge={selectedEdge}
+          graph={inspectorGraph}
+          onRefresh={refresh}
+          onClose={clearAllSelection}
+          onSelectNode={pivotToNode}
+        />
+      ) : selectedNode ? (
         <NodeInspector
           projectId={project.id}
           demo={DEMO_ONLY || !!project.demo}
           node={selectedNode}
-          graph={selectedDetail ? filteredDetail : filteredHl}
+          graph={inspectorGraph}
           onRefresh={refresh}
-          onClose={() => {
-            setSelectedDetail(null);
-            setSelectedHl(null);
-          }}
+          onClose={clearAllSelection}
+          onSelectNeighbor={pivotToNode}
         />
-      )}
+      ) : null}
       {error && (
         <div
           style={{
