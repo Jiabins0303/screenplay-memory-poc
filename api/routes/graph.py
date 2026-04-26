@@ -21,21 +21,64 @@ async def get_graph(
     cache: ClientCache = Depends(get_cache),
 ) -> GraphDTO:
     client = await get_client(project_id, cache)
-    gid = project_id if layer == "detail" else f"{project_id}__hl"
 
-    async with client._graphiti.driver.session() as sess:
-        node_result = await sess.run(
-            """
+    if layer == "bridge":
+        # Cross-layer view: Beat nodes from HL group + Scene/Beat nodes from
+        # detail group + bridge-tagged edges (Beat-COVERS-Scene). Edges may
+        # be empty when ``attach_beats_to_scenes`` produced no bridges
+        # (e.g. Beat.scene_range_* missing) — we still return cleanly.
+        node_query = """
+            MATCH (n)
+            WHERE (n.group_id = $gid_d
+                   AND ('Scene' IN labels(n) OR 'Beat' IN labels(n)))
+               OR (n.group_id = $gid_hl
+                   AND ('Beat' IN labels(n) OR 'Theme' IN labels(n)
+                        OR 'Arc' IN labels(n) OR 'Trope' IN labels(n)))
+            RETURN n.uuid AS uuid,
+                   n.name AS name,
+                   labels(n) AS labels,
+                   properties(n) AS props
+            LIMIT $limit
+        """
+        edge_query = """
+            MATCH (a)-[r]->(b) WHERE r.group_id = 'bridge'
+            RETURN r.uuid AS uuid,
+                   a.uuid AS src,
+                   b.uuid AS dst,
+                   type(r) AS type,
+                   properties(r) AS props
+            LIMIT $limit
+        """
+        node_params: dict[str, Any] = {
+            "gid_d": project_id,
+            "gid_hl": f"{project_id}__hl",
+            "limit": limit,
+        }
+        edge_params: dict[str, Any] = {"limit": limit}
+    else:
+        gid = project_id if layer == "detail" else f"{project_id}__hl"
+        node_query = """
             MATCH (n) WHERE n.group_id = $gid
             RETURN n.uuid AS uuid,
                    n.name AS name,
                    labels(n) AS labels,
                    properties(n) AS props
             LIMIT $limit
-            """,
-            gid=gid,
-            limit=limit,
-        )
+        """
+        edge_query = """
+            MATCH (a)-[r]->(b) WHERE r.group_id = $gid
+            RETURN r.uuid AS uuid,
+                   a.uuid AS src,
+                   b.uuid AS dst,
+                   type(r) AS type,
+                   properties(r) AS props
+            LIMIT $limit
+        """
+        node_params = {"gid": gid, "limit": limit}
+        edge_params = {"gid": gid, "limit": limit}
+
+    async with client._graphiti.driver.session() as sess:
+        node_result = await sess.run(node_query, **node_params)
         nodes = [
             NodeDTO(
                 uuid=row["uuid"] or "",
@@ -47,19 +90,7 @@ async def get_graph(
             if row["uuid"]
         ]
 
-        edge_result = await sess.run(
-            """
-            MATCH (a)-[r]->(b) WHERE r.group_id = $gid
-            RETURN r.uuid AS uuid,
-                   a.uuid AS src,
-                   b.uuid AS dst,
-                   type(r) AS type,
-                   properties(r) AS props
-            LIMIT $limit
-            """,
-            gid=gid,
-            limit=limit,
-        )
+        edge_result = await sess.run(edge_query, **edge_params)
         edges = [
             EdgeDTO(
                 uuid=row["uuid"],

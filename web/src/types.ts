@@ -6,7 +6,7 @@ export interface ProjectInfo {
   created_at: string | null;
 }
 
-export type Layer = "detail" | "hl";
+export type Layer = "detail" | "hl" | "bridge";
 
 export interface OntologyFieldSpec {
   name: string;

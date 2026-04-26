@@ -12,7 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-Layer = Literal["detail", "hl"]
+Layer = Literal["detail", "hl", "bridge"]
 
 
 # --- Projects --------------------------------------------------------------
