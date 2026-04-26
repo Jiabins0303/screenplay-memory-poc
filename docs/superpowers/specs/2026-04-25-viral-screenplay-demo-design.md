@@ -178,7 +178,7 @@ HL_ENTITY_TYPES = {"Beat": Beat, "Arc": Arc, "Theme": Theme, "Trope": Trope}
 HL_EDGE_TYPES   = {"BeatRelation": BeatRelation}     # 类不变
 ```
 
-`BeatRelation.relation_type` 已有 `EMBODIES` 选项, **直接复用承载 Trope→Beat / Trope→Arc / Trope→Theme 边** ("某节拍 EMBODIES 某套路"). 如运行中发现语义混淆, 再考虑新加 `EXEMPLIFIES` 子类型 (此 spec 范围内不加).
+`BeatRelation.relation_type` 已有 `EMBODIES` 选项, **直接复用承载 Beat→Trope / Beat→Theme / Arc→Theme 边**. 边方向遵循 EMBODIES 现有约定: **前者(具体)体现后者(抽象)**, 即 Beat → Trope (具体节拍 EMBODIES 抽象套路标签). 如运行中发现语义混淆, 再考虑新加 `EXEMPLIFIES` 子类型 (此 spec 范围内不加).
 
 ## 4 · 源剧本采集
 

@@ -1073,10 +1073,10 @@ Expected: prints `ok`.
 
 - [ ] **Step 1: Read current prompts_hl.py to preserve any used constants**
 
-Run: `cat src/screenplay_memory/chinese/prompts_hl.py`
-Note any constant names referenced from client.py / annotations_hl.py.
+Run: `cat src/screenplay_memory/chinese/prompts_hl.py && grep -rn "from screenplay_memory.chinese.prompts_hl" src tests scripts api`
+Note any constant names imported elsewhere — the new replacement MUST keep them. Known load-bearing exports as of Phase 2: `HL_EXTRACTION_INSTRUCTIONS`, `HL_SCENE_HEADER_TEMPLATE`, `build_hl_document`. Append `HL_SCENE_HEADER_TEMPLATE` and `build_hl_document` (verbatim from the old file) to the bottom of the new file.
 
-- [ ] **Step 2: Replace prompts_hl.py**
+- [ ] **Step 2: Replace prompts_hl.py** (instructions block; then preserve `HL_SCENE_HEADER_TEMPLATE` and `build_hl_document` at the bottom)
 
 ```python
 # src/screenplay_memory/chinese/prompts_hl.py
