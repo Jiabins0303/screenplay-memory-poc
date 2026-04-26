@@ -79,3 +79,6 @@ logs/
 
 # --- Jupyter (if used for debugging) ---
 .ipynb_checkpoints/
+
+# --- Brainstorming visual companion (mockups + server state) ---
+.superpowers/
