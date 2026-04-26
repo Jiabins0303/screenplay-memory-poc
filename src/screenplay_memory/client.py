@@ -9,16 +9,77 @@ Stage 1 was a bare baseline. Stage 2 layers on:
 
 from __future__ import annotations
 
+import json
 import os
 from datetime import datetime, timezone, timedelta
+from typing import Any
 
 from graphiti_core import Graphiti
 from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
 from graphiti_core.llm_client.config import LLMConfig
 from screenplay_memory.llm_client import SmartModelClient
 from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
-from graphiti_core.nodes import EpisodeType
+from graphiti_core.nodes import EntityNode, EpisodeType
+from graphiti_core.edges import EntityEdge
 
+
+def _flatten_attrs(attrs: dict[str, Any] | None) -> dict[str, Any]:
+    """Flatten LLM-returned attribute values for Neo4j compatibility.
+
+    Neo4j only accepts primitive properties + arrays of primitives. Graphiti
+    splats EntityNode.attributes / EntityEdge.attributes directly into the
+    save query, so any nested dict (which the LLM occasionally returns in
+    `attributes` like {'character_trait': {...}}) blows up with CypherTypeError.
+
+    This helper walks each value: dicts/lists-of-dicts get JSON-serialized;
+    primitives + lists-of-primitives pass through unchanged.
+    """
+    if not attrs:
+        return {}
+    out: dict[str, Any] = {}
+    for k, v in attrs.items():
+        if isinstance(v, dict):
+            out[k] = json.dumps(v, ensure_ascii=False)
+        elif isinstance(v, list) and v and isinstance(v[0], (dict, list)):
+            out[k] = json.dumps(v, ensure_ascii=False)
+        else:
+            out[k] = v
+    return out
+
+
+def _install_attribute_flattening_patch() -> None:
+    """Monkey-patch EntityNode.save / EntityEdge.save to flatten attributes.
+
+    Graphiti 0.x has no native protection against nested-map attribute values,
+    and our Pydantic ontology is necessarily permissive (extras allowed)
+    because Graphiti uses the `attributes` bag for any LLM-returned field
+    not explicitly declared. Without this patch, a single LLM whim like
+    'additional_info={...}' kills the whole add_episode call.
+    """
+    if getattr(EntityNode, "_screenplay_patched", False):
+        return
+
+    original_node_save = EntityNode.save
+    original_edge_save = EntityEdge.save
+
+    async def patched_node_save(self, driver):
+        self.attributes = _flatten_attrs(self.attributes)
+        return await original_node_save(self, driver)
+
+    async def patched_edge_save(self, driver):
+        self.attributes = _flatten_attrs(self.attributes)
+        return await original_edge_save(self, driver)
+
+    EntityNode.save = patched_node_save
+    EntityEdge.save = patched_edge_save
+    EntityNode._screenplay_patched = True
+    EntityEdge._screenplay_patched = True
+
+
+# ruff: noqa: E402 — helper definitions and the monkey-patch must be
+# defined before the rest of the screenplay_memory imports below, because
+# importing screenplay_memory.client must install the EntityNode/EntityEdge
+# patch at process startup, before any MemoryClient() is constructed.
 from screenplay_memory.annotations import annotate_witness_scope
 from screenplay_memory.config import Settings
 from screenplay_memory.chinese.coreference import resolve_coreference
@@ -34,6 +95,8 @@ from screenplay_memory.ontology import EDGE_TYPES, ENTITY_TYPES
 from screenplay_memory.ontology_customization import load_spec, spec_to_pydantic
 from screenplay_memory.ontology_hl import HL_EDGE_TYPES, HL_ENTITY_TYPES
 from screenplay_memory.queries.cognitive import query_character_knowledge
+
+_install_attribute_flattening_patch()
 
 
 # Anchor for synthetic per-scene reference times. Keeping it well in the past

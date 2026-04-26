@@ -15,7 +15,11 @@ class Identity(BaseModel):
     """
 
     persona_label: str = Field(
-        description="身份的简短标签，如'厉氏集团会计'、'苏家二小姐'、'前任未婚妻'",
+        default="",
+        description=(
+            "身份的简短标签 (可选; 留空时回落到 Graphiti 自动填的 name 字段). "
+            "如'厉氏集团会计'、'苏家二小姐'、'前任未婚妻'."
+        ),
     )
     is_real: bool = Field(
         default=False,

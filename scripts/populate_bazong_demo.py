@@ -30,6 +30,7 @@ sys.set_int_max_str_digits(0)
 
 from neo4j import AsyncGraphDatabase  # noqa: E402
 
+from screenplay_memory.annotations_hl import attach_beats_to_scenes  # noqa: E402
 from screenplay_memory.client import MemoryClient  # noqa: E402
 from screenplay_memory.config import Settings  # noqa: E402
 from screenplay_memory.queries.scene_index import build_scene_index  # noqa: E402
@@ -87,8 +88,10 @@ async def main() -> int:
 
             t0 = time.time()
             print("→ attach_beats_to_scenes... ", flush=True, end="")
-            await mc.attach_beats_to_scenes()
-            print(f"{time.time() - t0:.1f}s")
+            bridge_info = await attach_beats_to_scenes(
+                mc._graphiti, project_id=args.project_id
+            )
+            print(f"{time.time() - t0:.1f}s {bridge_info}")
 
     finally:
         await mc.close()
