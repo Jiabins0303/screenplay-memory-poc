@@ -306,7 +306,10 @@ class Organization(BaseModel):
         "company", "hospital", "school", "clan_business", "government", "other"
     ] = Field(
         default="company",
-        description="组织类型",
+        description=(
+            "组织类型: company=商业公司; hospital=医院; school=学校; "
+            "clan_business=家族企业; government=政府/机关; other=其他"
+        ),
     )
 ```
 
@@ -367,13 +370,21 @@ class Location(BaseModel):
 
     Examples:
         - "厉北辰的总裁办公室" → Location(loc_name="厉总办公室", loc_type="office")
-        - "苏家祖宅" → Location(loc_name="苏家祖宅", loc_type="home")
+        - "苏家祖宅" → Location(loc_name="苏家祖宅", loc_type="mansion")
     """
 
-    loc_name: str = Field(description="场所名，如'厉总办公室'、'苏家祖宅'")
+    loc_name: str = Field(description="场所名，如'厉总办公室'、'苏家祖宅'、'凯悦酒店'")
     loc_type: Literal[
-        "office", "home", "hospital", "restaurant", "outdoor", "school", "other"
-    ] = Field(default="other")
+        "office", "home", "mansion", "hotel", "hospital", "restaurant",
+        "bar", "outdoor", "school", "prison", "temple", "other"
+    ] = Field(
+        default="other",
+        description=(
+            "场所类型: office=办公室; home=普通住宅; mansion=别墅/祖宅; "
+            "hotel=酒店; hospital=医院; restaurant=餐厅; bar=酒吧/夜店; "
+            "outdoor=户外; school=学校; prison=监狱/拘留所; temple=寺庙; other=其他"
+        ),
+    )
 ```
 
 - [ ] **Step 6: Create misunderstanding.py**
@@ -498,10 +509,9 @@ class Character(BaseModel):
     )
 ```
 
-- [ ] **Step 2: Replace scene.py**
+- [ ] **Step 2: Replace scene.py** (field names `episode_number` and `location` preserve the existing Cypher contract in `annotations_hl.py` and the JSON shape consumed by `web/src/pages/Graph.tsx`)
 
 ```python
-# src/screenplay_memory/ontology/scene.py
 from __future__ import annotations
 
 from typing import Literal
@@ -512,19 +522,22 @@ from pydantic import BaseModel, Field
 class Scene(BaseModel):
     """剧本场次实体。
 
-    每个场次对应一次 add_episode 调用。Scene 的 episode/scene_number 必须从
-    场次头 [本段为第X集第Y场] 抽出来；location_hint 抓场次头里的地点描述。
+    每个场次对应一次 add_episode 调用。Scene 的 episode_number/scene_number
+    必须从场次头 [本段为第X集第Y场] 抽出来；location 抓场次头里的地点描述。
     """
 
-    episode: int = Field(description="集数，整数")
-    scene_number: int = Field(description="本集中的场次序号，整数")
-    location_hint: str = Field(
+    episode_number: int = Field(default=0, description="集数, 从场次头 [本段为第X集第Y场] 抽")
+    scene_number: int = Field(default=0, description="本集中的场次序号, 从场次头抽")
+    location: str = Field(
         default="",
         description="场次头给出的地点描述，如'厉氏集团总裁办公室'、'苏家祖宅'",
     )
     time_of_day: Literal[
         "morning", "afternoon", "evening", "night", "unknown"
-    ] = Field(default="unknown")
+    ] = Field(
+        default="unknown",
+        description="场次时间段；优先取场次头里的明确时间，无则 unknown",
+    )
 ```
 
 - [ ] **Step 3: Replace plot_event.py**
@@ -1526,8 +1539,8 @@ async def fixture_graph(driver):
             """
             CREATE (e1:Episodic {uuid:'e1', group_id:$gid, episode_num:1, scene_num:1})
             CREATE (e2:Episodic {uuid:'e2', group_id:$gid, episode_num:1, scene_num:2})
-            CREATE (s1:Scene   {uuid:'s1', group_id:$gid, episode:1, scene_number:1, name:'第1集第1场'})
-            CREATE (s2:Scene   {uuid:'s2', group_id:$gid, episode:1, scene_number:2, name:'第1集第2场'})
+            CREATE (s1:Scene   {uuid:'s1', group_id:$gid, episode_number:1, scene_number:1, name:'第1集第1场'})
+            CREATE (s2:Scene   {uuid:'s2', group_id:$gid, episode_number:1, scene_number:2, name:'第1集第2场'})
             CREATE (c1:Character {uuid:'c1', group_id:$gid, name:'苏念', episodes:['e1','e2']})
             CREATE (c2:Character {uuid:'c2', group_id:$gid, name:'厉北辰', episodes:['e1']})
             CREATE (c1)-[r:KNOWS {uuid:'r1', group_id:$gid, episodes:['e1']}]->(c2)
@@ -1654,7 +1667,7 @@ async def _link_episodic_to_scene(sess, gid: str) -> int:
         """
         MATCH (e:Episodic) WHERE e.group_id=$gid
         MATCH (s:Scene) WHERE s.group_id=$gid
-            AND s.episode = e.episode_num
+            AND s.episode_number = e.episode_num
             AND s.scene_number = e.scene_num
         MERGE (e)-[r:OF_SCENE]->(s)
         RETURN count(r) AS n

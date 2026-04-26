@@ -64,7 +64,10 @@ class Item(BaseModel):
 class Location(BaseModel):
     """至少在 2 个不同 Scene 中出现的物理场所. 一次性场所不抽."""
     loc_name: str
-    loc_type: Literal["office","home","hospital","restaurant","outdoor","school","other"] = "other"
+    loc_type: Literal[
+        "office","home","mansion","hotel","hospital","restaurant",
+        "bar","outdoor","school","prison","temple","other"
+    ] = "other"
 
 # misunderstanding.py — NEW (误会流核心)
 class Misunderstanding(BaseModel):
@@ -79,11 +82,11 @@ class Secret(BaseModel):
     secret_content: str
     secret_type: Literal["identity","past_event","relationship","intention","asset","other"] = "other"
 
-# scene.py — KEPT (字段精简)
+# scene.py — KEPT (字段精简, 字段名与 annotations_hl.py / web Graph.tsx 现有契约一致)
 class Scene(BaseModel):
-    episode: int
-    scene_number: int
-    location_hint: str = ""
+    episode_number: int = 0      # 从场次头抽; default=0 容错降级
+    scene_number: int = 0
+    location: str = ""           # 场次头给出的地点描述
     time_of_day: Literal["morning","afternoon","evening","night","unknown"] = "unknown"
 
 # plot_event.py — KEPT (扩 event_type)
@@ -251,7 +254,7 @@ HL_EDGE_TYPES   = {"BeatRelation": BeatRelation}     # 类不变
    ```cypher
    MATCH (e:Episodic) WHERE e.group_id=$gid
    MATCH (s:Scene) WHERE s.group_id=$gid
-     AND s.episode = $ep AND s.scene_number = $sc  // by reference_time decode
+     AND s.episode_number = e.episode_num AND s.scene_number = e.scene_num
    MERGE (e)-[:OF_SCENE]->(s)
    ```
 
