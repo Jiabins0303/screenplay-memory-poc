@@ -182,43 +182,34 @@ HL_EDGE_TYPES   = {"BeatRelation": BeatRelation}     # 类不变
 
 ## 4 · 源剧本采集
 
-### 4.1 选源
-- 主候选: 《厉总，你找错夫人了》 / 《闪婚后, 亿万总裁马甲藏不住了》 (任一在番茄小说有完整公开章节的同套路作品).
-- 锁定后, 把番茄章节 URL 列入 `tests/seed_data/source_urls.txt`.
+### 4.1 选源 (PIVOTED 2026-04-25 — 见下)
+原计划: 抓 番茄小说《厉总, 你找错夫人了》/同类网文 → LLM 改写为剧本格式.
+**实际采用: 合成原创剧本** — 因为 番茄 章节页 JS 渲染, httpx 无法抓取; 合成方案保证 ontology 全覆盖、零版权风险、零 LLM 成本.
 
-### 4.2 抓取脚本 (`scripts/fetch_novel.py`, NEW)
-- 输入: `source_urls.txt` (10-15 URL).
-- 用 `httpx` GET 章节页 + 正文选择器解析 (番茄章节有标准 HTML 结构).
-- 输出: `tests/seed_data/raw/chapter_{N}.txt` (纯文本).
-- 不调用 LLM, 0 成本.
-
-### 4.3 改写脚本 (`scripts/adapt_to_scenes.py`, NEW)
-- 输入: `tests/seed_data/raw/chapter_{N}.txt`.
-- 调 LLM (Qwen2.5-72b 一次, ~$0.5 总) 把每章拆成 4-6 场, 输出剧本格式:
-  ```
-  【第N集第M场】场景: 厉总办公室 / 时间: 上午
-  [厉北辰坐在办公桌前, 翻看苏念的资料.]
-  厉北辰: "查清楚了, 这个女人就是冲着我的钱来的."
-  ...
-  ```
-- prompt 里 **明确告知 ontology 类型 + 例子**, 引导 LLM 在改写时刻意保留(不消除) Identity/Misunderstanding/Item 等线索.
-- 输出: `tests/seed_data/scenes/ep{N}_sc{M}.txt`, 共 ~60 场.
-- 改写后 **手动 review 一遍** (一次性, 不在 CI). 确保前 3 集每个新实体类型至少出现 1 次.
+### 4.2 合成剧本生成 (新方案)
+- **范围**: 10 集 × 4 场 = 40 场, ~25K 中文字总量.
+- **故事大纲**: 双向隐瞒霸总文 (苏念=苏家二小姐隐瞒身份, 厉北辰=寻找童年失散未婚妻), 含误会流 / 契约婚 / 失忆 / 复仇 / 财阀对抗等真实爆款套路.
+- **角色 bible**: 10 主要角色, 含 Identity 多重身份, 每角色 status_tags 完整.
+- **场景文件**: 直接写入 `tests/seed_data/scenes/ep{NN}_sc{NN}.txt`, 共 40 个文件.
+- **抽取保证**: 前 2 集每场刻意安排 1-2 个新实体类型出现, 给 LLM "教学样本".
+- **fetch_novel.py / adapt_to_scenes.py**: **不实现** (源已是终态).
+- **成本**: $0 (取代原 $0.5 LLM 改写).
 
 ### 4.4 灌库
 - 新 project_id: `bazong_demo`.
 - `MemoryClient(project_id="bazong_demo").ingest(text)` 逐场调用; HL 层 `ingest_hl(scenes)` 全剧一次.
 - 灌库后跑 `scripts/build_scene_index.py` (见 §5.4).
 
-### 4.5 预算
-| 阶段 | 估算 |
-|---|---|
-| 章节抓取 | $0 |
-| 章节→场次改写 (一次性) | $0.5 |
-| 详细层 ingest 60 场 | $2.5 |
-| 节拍层 ingest 1 次 | $0.5 |
-| 重试预算 | $1.5 |
-| **总计** | **~$5** |
+### 4.5 预算 (修订, 因 4.1 pivot)
+| 阶段 | 原估算 | 现 (合成方案) |
+|---|---|---|
+| 章节抓取 + 改写 | $0.5 | **$0** |
+| 详细层 ingest 40 场 | $2.5 | **~$1.7** |
+| 节拍层 ingest 1 次 | $0.5 | $0.5 |
+| 重试预算 | $1.5 | $1.5 |
+| **总计** | **~$5** | **~$3.7** |
+
+省下的预算可以用于一次额外的 prompt 调优重试.
 
 ## 5 · 后端 (Python) 改动
 
