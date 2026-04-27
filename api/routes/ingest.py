@@ -12,9 +12,11 @@ unless ``force=true``.
 from __future__ import annotations
 
 import asyncio
+import re
+from pathlib import Path
 from typing import AsyncIterator
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from api.deps import ClientCache, get_cache, get_client
 from api.models import IngestRequest
@@ -24,6 +26,56 @@ from screenplay_memory.annotations_hl import attach_beats_to_scenes
 router = APIRouter(prefix="/projects/{project_id}/ingest", tags=["ingest"])
 
 _MAX_CONCURRENT = 2
+
+# --- Demo source-scene preview --------------------------------------------
+#
+# Tab 03 of the web UI shows a read-only preview of the original script
+# files so a viewer can see "this is the source script" alongside the
+# graph. Files live on the backend filesystem (tests/seed_data/scenes)
+# and are only exposed for the bazong_demo project — other projects do
+# not have these files.
+_SCENES_DIR = Path(__file__).resolve().parents[2] / "tests" / "seed_data" / "scenes"
+_SCENE_FILENAME_RE = re.compile(r"^ep(\d+)_sc(\d+)\.txt$")
+_SCENE_CONTENT_CAP = 2000  # characters per scene; long enough for any seed file
+_SOURCE_SCENES_PROJECT = "bazong_demo"
+
+
+@router.get("/source-scenes")
+async def source_scenes(project_id: str) -> dict:
+    """Return read-only seed script for the demo project.
+
+    Globs ``tests/seed_data/scenes/ep*_sc*.txt``, parses episode/scene
+    from the filename and returns the raw text (capped to
+    ``_SCENE_CONTENT_CAP`` characters per scene). Restricted to the
+    bazong_demo project for now.
+    """
+    if project_id != _SOURCE_SCENES_PROJECT:
+        raise HTTPException(
+            status_code=404,
+            detail=f"source-scenes is only available for project '{_SOURCE_SCENES_PROJECT}'",
+        )
+    if not _SCENES_DIR.is_dir():
+        raise HTTPException(status_code=404, detail="seed_data/scenes directory missing")
+
+    scenes: list[dict] = []
+    for path in sorted(_SCENES_DIR.glob("ep*_sc*.txt")):
+        m = _SCENE_FILENAME_RE.match(path.name)
+        if not m:
+            continue
+        ep = int(m.group(1))
+        sc = int(m.group(2))
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if len(content) > _SCENE_CONTENT_CAP:
+            content = content[:_SCENE_CONTENT_CAP] + "…"
+        scenes.append({
+            "episode_number": ep,
+            "scene_number": sc,
+            "content": content,
+        })
+    return {"scenes": scenes}
 
 
 @router.post("")

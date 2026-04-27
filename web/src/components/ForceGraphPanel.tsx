@@ -151,22 +151,33 @@ interface SimState {
   drag: { id: string; n: SimNode } | null;
   hover: string | null;
   hoverEdge: string | null;
-  // Auto-freeze: once total kinetic energy stays below KE_FREEZE_THRESHOLD
-  // for KE_FREEZE_TICKS consecutive ticks we flip ``frozen`` and stop
-  // integrating physics. User interaction (drag, click, resize, data
-  // change) resets ``stableTicks`` and clears ``frozen``.
+  // Auto-freeze: the simulation is pre-settled synchronously at mount
+  // (see PRESETTLE_TICKS in the seed effect), so we start ``frozen`` and
+  // only re-integrate physics while a user is dragging or for a brief
+  // anneal after drag-release. ``releaseTicks`` counts down a small
+  // number of ticks after pointer-up so released nodes don't fly off.
   frozen: boolean;
-  stableTicks: number;
+  releaseTicks: number;
 }
 
+// Force-simulation tuning. Constants are reused for both the synchronous
+// pre-settle pass and the runtime drag-anneal so layouts stay consistent.
 const REPEL = 1800;
 const SPRING = 0.02;
 const IDEAL_LEN = 78;
 const DAMP = 0.86;
 const CENTER = 0.012;
 
-const KE_FREEZE_THRESHOLD = 0.5;
-const KE_FREEZE_TICKS = 30;
+// Pre-settle: number of synchronous physics ticks to run on mount before
+// handing off to the rAF render loop. 300 was visually verified as the
+// point where layouts converge for our typical 50-200 node graphs; if
+// you grow the graph past ~300 nodes, bump this to 500 or introduce a
+// cooldown schedule (high damp early, normal late).
+const PRESETTLE_TICKS = 300;
+// Brief post-drag anneal: number of ticks to keep integrating physics
+// after pointer-up so released nodes settle their neighbours instead of
+// snapping in place mid-flight.
+const RELEASE_ANNEAL_TICKS = 5;
 
 export default function ForceGraphPanel({
   graph,
@@ -233,14 +244,71 @@ export default function ForceGraphPanel({
       n.y = Math.sin(a) * R * (0.6 + Math.random() * 0.4);
     });
 
+    // Pre-settle the simulation synchronously before the first paint.
+    // This converges the layout instantly so the user never sees the
+    // jittery "graph melts into shape" animation. After this loop the
+    // render loop starts with ``frozen: true``; only drag wakes it.
+    const idToNode = new Map(nodes.map((n) => [n.id, n]));
+    for (let t = 0; t < PRESETTLE_TICKS; t++) {
+      // Repulsion (pairwise).
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const a = nodes[i];
+          const b = nodes[j];
+          const dx = a.x - b.x;
+          const dy = a.y - b.y;
+          const d2 = dx * dx + dy * dy + 0.01;
+          const d = Math.sqrt(d2);
+          const f = REPEL / d2;
+          const fx = (dx / d) * f;
+          const fy = (dy / d) * f;
+          a.vx += fx;
+          a.vy += fy;
+          b.vx -= fx;
+          b.vy -= fy;
+        }
+      }
+      // Spring.
+      for (const e of edges) {
+        const a = idToNode.get(e.source);
+        const b = idToNode.get(e.target);
+        if (!a || !b) continue;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
+        const diff = d - IDEAL_LEN;
+        const f = diff * SPRING;
+        const fx = (dx / d) * f;
+        const fy = (dy / d) * f;
+        a.vx += fx;
+        a.vy += fy;
+        b.vx -= fx;
+        b.vy -= fy;
+      }
+      // Center pull + damp + integrate.
+      for (const n of nodes) {
+        n.vx -= n.x * CENTER;
+        n.vy -= n.y * CENTER;
+        n.vx *= DAMP;
+        n.vy *= DAMP;
+        n.x += n.vx;
+        n.y += n.vy;
+      }
+    }
+    // Zero residual velocity so the post-mount frozen state is clean.
+    for (const n of nodes) {
+      n.vx = 0;
+      n.vy = 0;
+    }
+
     simRef.current = {
       nodes,
       edges,
       drag: null,
       hover: null,
       hoverEdge: null,
-      frozen: false,
-      stableTicks: 0,
+      frozen: true,
+      releaseTicks: 0,
     };
   }, [graph]);
 
@@ -260,11 +328,8 @@ export default function ForceGraphPanel({
         canvas.style.height = height + "px";
         const ctx = canvas.getContext("2d");
         if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        // Resize may shift the visible area; let the simulation breathe.
-        if (simRef.current) {
-          simRef.current.frozen = false;
-          simRef.current.stableTicks = 0;
-        }
+        // Resize only changes the canvas viewport; the pre-settled
+        // layout is already centred on (0, 0) so we don't wake the sim.
       }
     });
     ro.observe(wrap);
@@ -288,10 +353,11 @@ export default function ForceGraphPanel({
       // below can reach it.
       const idToNode = new Map(nodes.map((n) => [n.id, n]));
 
-      // Auto-freeze gate: skip physics integration once the simulation
-      // has settled. Dragging always re-runs physics so the dragged node
-      // can pull its neighbours along; otherwise we just render.
-      if (!sim.frozen || drag) {
+      // Freeze gate: physics is pre-settled at mount, so we only re-run
+      // it while a node is being dragged or for a brief anneal window
+      // after release (RELEASE_ANNEAL_TICKS). Otherwise we just render.
+      const integrate = !sim.frozen || drag !== null || sim.releaseTicks > 0;
+      if (integrate) {
         // Repulsion (pairwise, O(N²) — fine at <500 nodes).
         for (let i = 0; i < nodes.length; i++) {
           for (let j = i + 1; j < nodes.length; j++) {
@@ -329,9 +395,7 @@ export default function ForceGraphPanel({
           b.vy -= fy;
         }
 
-        // Center pull + damp + integrate. Track total kinetic energy so we
-        // can decide whether to freeze on the next tick.
-        let ke = 0;
+        // Center pull + damp + integrate.
         for (const n of nodes) {
           if (drag && drag.id === n.id) {
             n.vx = 0;
@@ -344,26 +408,23 @@ export default function ForceGraphPanel({
           n.vy *= DAMP;
           n.x += n.vx;
           n.y += n.vy;
-          ke += n.vx * n.vx + n.vy * n.vy;
         }
 
-        // Drag forces a wake-up; otherwise count consecutive low-KE ticks
-        // and flip ``frozen`` once we cross the threshold.
+        // Drag keeps the sim awake; release-anneal counts down then
+        // re-freezes. We zero residual velocity on freeze so a future
+        // wake-up starts clean.
         if (drag) {
-          sim.stableTicks = 0;
           sim.frozen = false;
-        } else if (ke < KE_FREEZE_THRESHOLD) {
-          sim.stableTicks += 1;
-          if (sim.stableTicks >= KE_FREEZE_TICKS) {
+          sim.releaseTicks = 0;
+        } else if (sim.releaseTicks > 0) {
+          sim.releaseTicks -= 1;
+          if (sim.releaseTicks === 0) {
             sim.frozen = true;
-            // Zero out residual velocity so a future un-freeze starts clean.
             for (const n of nodes) {
               n.vx = 0;
               n.vy = 0;
             }
           }
-        } else {
-          sim.stableTicks = 0;
         }
       }
 
@@ -573,14 +634,15 @@ export default function ForceGraphPanel({
     return best ? best.ed : null;
   };
 
-  // Any user interaction wakes the simulation back up so dragging /
-  // clicking after a freeze still updates positions and the highlight
-  // halo redraws cleanly.
+  // Wake the simulation for a drag interaction. Click-only interactions
+  // (selecting a node / edge / background) do not wake the sim — the
+  // pre-settled layout is correct, and the next render tick will repaint
+  // the highlight halo regardless of the freeze state.
   const wakeSim = () => {
     const sim = simRef.current;
     if (!sim) return;
     sim.frozen = false;
-    sim.stableTicks = 0;
+    sim.releaseTicks = 0;
   };
 
   const onDown = (ev: React.PointerEvent<HTMLDivElement>) => {
@@ -593,15 +655,14 @@ export default function ForceGraphPanel({
       (ev.target as HTMLElement).setPointerCapture?.(ev.pointerId);
       return;
     }
-    // No node hit — try edges.
+    // No node hit — try edges. Selection-only interactions don't wake
+    // the simulation (see wakeSim comment).
     const hitEdge = locateEdge(ev.clientX, ev.clientY);
     if (hitEdge && hitEdge.uuid) {
-      wakeSim();
       onSelectEdge?.(hitEdge.uuid);
       onSelect(null);
       return;
     }
-    wakeSim();
     onSelect(null);
     onSelectEdge?.(null);
   };
@@ -621,7 +682,16 @@ export default function ForceGraphPanel({
     sim.hoverEdge = hovered ? hovered.uuid : null;
   };
   const onUp = () => {
-    if (simRef.current) simRef.current.drag = null;
+    const sim = simRef.current;
+    if (!sim) return;
+    if (sim.drag) {
+      // Released a dragged node — schedule a brief anneal so the
+      // released node's neighbours settle around its new position
+      // instead of locking instantly mid-flight.
+      sim.drag = null;
+      sim.releaseTicks = RELEASE_ANNEAL_TICKS;
+      sim.frozen = false;
+    }
   };
 
   return (
