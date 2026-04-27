@@ -1,33 +1,26 @@
 // 认知边界 · Cognitive Boundary — flagship "who knew what when" view.
 //
-// For demo projects we render the full MOCK knowledge matrix directly
-// (frozen timeline, six characters × three facts). For real projects we
-// lazy-load via POST /query mode=cognitive — one call per character for
-// the currently selected beat. Facts are derived from the union of all
-// knows_facts strings returned so far; clicking through the timeline
-// triggers fresh queries as needed and the results are cached per
-// (character, beat) pair so moving back doesn't re-spend.
+// Always backed by the API now: detail-layer Character + HL-layer Beat
+// nodes are joined into a (char × beat) → facts[] matrix server-side via
+// GET /projects/{pid}/boundary. The static-pages demo intercepts that
+// fetch and returns a baked snapshot (see api.ts + mockdata.bazong.ts) so
+// this page renders the same code path in either mode.
 //
 // Tradeoffs: partial wiring — we can't tell you "since_beat" with
 // precision for real data because query_cognitive is cutoff-based, not
 // revelation-based. The matrix shows whether a fact is known *as of* the
 // selected beat, which is the actionable question most writers have.
+//
+// Module-level cache: the boundary computation is server-expensive (one
+// witness-scope walk per beat) so we keep responses by project id. The
+// effect short-circuits on cache hit, which also gives a synchronous
+// initial render when DEMO_ONLY pre-seeds the cache from the snapshot.
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { DEMO_ONLY } from "../env";
 import { useUI } from "../store";
-import {
-  MOCK_BEATS,
-  MOCK_CHARACTERS,
-  MOCK_FACTS,
-  MOCK_KNOWLEDGE,
-  MockCharacter,
-  ROLE_ZH,
-  findBeat,
-  findCharacter,
-  findFact,
-} from "../mockdata";
+import { ROLE_ZH, MOCK_BAZONG_BOUNDARY } from "../mockdata";
 
 interface RealCharacter {
   uuid: string;
@@ -51,12 +44,12 @@ interface BoundarySnapshot {
   latest: Record<string, { fact: string; beat_uuid: string } | null>;
 }
 
-const MOCK_ORDER = Object.fromEntries(MOCK_BEATS.map((b, i) => [b.id, i]));
-
-function mockKnows(charId: string, factId: string, beatIdx: number): boolean {
-  const since = MOCK_KNOWLEDGE[charId]?.[factId];
-  if (!since) return false;
-  return MOCK_ORDER[since] <= beatIdx;
+// Pre-seed the cache with the static snapshot when DEMO_ONLY so the page
+// renders synchronously on first paint and the api interception layer is
+// never even consulted. Live mode populates this on demand.
+const boundaryCache = new Map<string, BoundarySnapshot>();
+if (DEMO_ONLY) {
+  boundaryCache.set("bazong_demo", MOCK_BAZONG_BOUNDARY as BoundarySnapshot);
 }
 
 export default function BoundaryPage() {
@@ -64,64 +57,7 @@ export default function BoundaryPage() {
   if (!project) {
     return <div style={{ padding: 40, color: "var(--ink-500)" }}>先选择或新建项目。</div>;
   }
-  return DEMO_ONLY || project.demo ? <BoundaryMock /> : <BoundaryLive projectId={project.id} />;
-}
-
-// ---------------- MOCK ----------------
-
-function BoundaryMock() {
-  const [beatIdx, setBeatIdx] = useState(MOCK_BEATS.length - 1);
-  const [selChar, setSelChar] = useState("c-lijing");
-  const [selFact, setSelFact] = useState("fact-adoption");
-  const currentBeat = MOCK_BEATS[beatIdx];
-
-  return (
-    <Shell
-      currentLabel={currentBeat.label}
-      currentMeta={`E${currentBeat.ep} · ${currentBeat.type}`}
-      timeline={
-        <BeatTimeline
-          beats={MOCK_BEATS.map((b) => ({
-            id: b.id,
-            label: b.label,
-            ep: b.ep,
-            tension: b.tension,
-          }))}
-          current={beatIdx}
-          onChange={setBeatIdx}
-        />
-      }
-      matrixHeader={
-        <>
-          <span className="song" style={{ fontSize: 15, color: "var(--ink-800)" }}>
-            认知矩阵
-          </span>
-          <span className="kicker" style={{ marginLeft: 8, fontSize: 11 }}>
-            角色 / 事实
-          </span>
-          <div style={{ flex: 1 }} />
-          <span className="tiny muted">截至「{currentBeat.label}」</span>
-        </>
-      }
-      matrix={
-        <MockMatrix
-          beatIdx={beatIdx}
-          onSelectChar={setSelChar}
-          onSelectCell={(c, f) => {
-            setSelChar(c);
-            setSelFact(f);
-          }}
-          selChar={selChar}
-        />
-      }
-      detail={
-        <>
-          <MockCharacterReveal charId={selChar} beatIdx={beatIdx} />
-          <MockFactTrace factId={selFact} beatIdx={beatIdx} />
-        </>
-      }
-    />
-  );
+  return <BoundaryLive projectId={project.id} />;
 }
 
 function Shell({
@@ -213,118 +149,6 @@ function Shell({
         </div>
       </div>
     </div>
-  );
-}
-
-function MockMatrix({
-  beatIdx,
-  selChar,
-  onSelectChar,
-  onSelectCell,
-}: {
-  beatIdx: number;
-  selChar: string;
-  onSelectChar: (c: string) => void;
-  onSelectCell: (c: string, f: string) => void;
-}) {
-  return (
-    <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720 }}>
-      <thead>
-        <tr>
-          <th style={TH} />
-          {MOCK_FACTS.map((f) => (
-            <th key={f.id} style={TH}>
-              <div
-                style={{
-                  writingMode: "vertical-rl",
-                  textOrientation: "upright",
-                  fontFamily: "var(--font-song)",
-                  fontSize: 13,
-                  color: "var(--ink-700)",
-                  letterSpacing: 0,
-                  padding: "12px 0 10px",
-                  margin: "0 auto",
-                }}
-              >
-                {f.text}
-              </div>
-              <div
-                className="tiny muted mono"
-                style={{ textAlign: "center", paddingBottom: 10 }}
-              >
-                揭于 · {findBeat(f.revealBeat)?.label ?? "—"}
-              </div>
-            </th>
-          ))}
-          <th style={{ ...TH, width: "28%" }}>
-            <div
-              className="tiny muted"
-              style={{ letterSpacing: 0, textAlign: "left", paddingLeft: 16 }}
-            >
-              最近得知
-            </div>
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        {MOCK_CHARACTERS.map((c) => (
-          <tr
-            key={c.id}
-            onClick={() => onSelectChar(c.id)}
-            style={{
-              background: selChar === c.id ? "var(--ink-150)" : "transparent",
-              borderTop: "1px solid var(--hairline)",
-              cursor: "pointer",
-            }}
-          >
-            <td style={{ padding: "14px 22px", borderRight: "1px solid var(--hairline)", width: 200 }}>
-              <div
-                className="song"
-                style={{ fontSize: 15, color: "var(--ink-900)" }}
-              >
-                {c.name}
-              </div>
-              <div className="tiny muted">{ROLE_ZH[c.role] || c.role}</div>
-            </td>
-            {MOCK_FACTS.map((f) => {
-              const k = mockKnows(c.id, f.id, beatIdx);
-              const since = MOCK_KNOWLEDGE[c.id]?.[f.id];
-              const sinceBeat = since ? findBeat(since) : null;
-              const willKnow = !!since && MOCK_ORDER[since] > beatIdx;
-              return (
-                <td
-                  key={f.id}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSelectCell(c.id, f.id);
-                  }}
-                  style={{
-                    padding: "12px 8px",
-                    textAlign: "center",
-                    borderRight: "1px solid var(--hairline)",
-                  }}
-                >
-                  <KnowMark
-                    known={k}
-                    willKnow={willKnow}
-                    label={
-                      k && sinceBeat
-                        ? sinceBeat.label
-                        : willKnow && sinceBeat
-                        ? `将于 ${sinceBeat.label}`
-                        : "—"
-                    }
-                  />
-                </td>
-              );
-            })}
-            <td style={{ padding: "12px 16px" }}>
-              <MockLatestRevealBadge charId={c.id} beatIdx={beatIdx} />
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
   );
 }
 
@@ -491,197 +315,8 @@ function BeatTimeline({
   );
 }
 
-function MockLatestRevealBadge({ charId, beatIdx }: { charId: string; beatIdx: number }) {
-  const known = MOCK_FACTS.filter((f) => {
-    const s = MOCK_KNOWLEDGE[charId]?.[f.id];
-    return s && MOCK_ORDER[s] <= beatIdx;
-  })
-    .map((f) => ({ f, b: MOCK_KNOWLEDGE[charId][f.id] as string }))
-    .sort((a, b) => MOCK_ORDER[b.b] - MOCK_ORDER[a.b]);
-  if (!known.length) return <span className="tiny muted">尚无</span>;
-  const latest = known[0];
-  const beat = findBeat(latest.b);
-  return (
-    <div>
-      <div className="song" style={{ fontSize: 13, color: "var(--ink-800)" }}>
-        {latest.f.text}
-      </div>
-      <div className="tiny muted mono" style={{ marginTop: 2 }}>
-        于 {beat?.label}
-      </div>
-    </div>
-  );
-}
-
-function MockCharacterReveal({ charId, beatIdx }: { charId: string; beatIdx: number }) {
-  const c = findCharacter(charId);
-  if (!c) return null;
-  return (
-    <div className="panel" style={{ padding: 18 }}>
-      <CharacterHeader character={c} />
-      <div
-        className="song"
-        style={{
-          color: "var(--ink-700)",
-          fontSize: 13.5,
-          lineHeight: 1.8,
-          marginBottom: 14,
-          paddingLeft: 10,
-          borderLeft: "2px solid var(--seal-500)",
-        }}
-      >
-        {c.note}
-      </div>
-      <div className="col" style={{ gap: 8 }}>
-        {MOCK_FACTS.map((f) => {
-          const since = MOCK_KNOWLEDGE[charId]?.[f.id];
-          const sinceIdx = since ? MOCK_ORDER[since] : -1;
-          const k = sinceIdx >= 0 && sinceIdx <= beatIdx;
-          const beat = since ? findBeat(since) : null;
-          return (
-            <div
-              key={f.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: "8px 12px",
-                background: k ? "var(--ink-100)" : "var(--ink-050)",
-                border: "1px solid " + (k ? "#e4002b" : "var(--hairline)"),
-                borderRadius: 0,
-              }}
-            >
-              <div
-                style={{
-                  width: 10,
-                  height: 10,
-                  borderRadius: "50%",
-                  background: k ? "var(--seal-500)" : "transparent",
-                  border: "1.5px solid " + (k ? "var(--seal-500)" : "var(--ink-400)"),
-                }}
-              />
-              <span
-                className="song"
-                style={{ fontSize: 13, color: "var(--ink-800)", flex: 1 }}
-              >
-                {f.text}
-              </span>
-              {k && beat ? (
-                <span className="tiny mono" style={{ color: "var(--seal-400)" }}>
-                  于 {beat.label}
-                </span>
-              ) : sinceIdx >= 0 && beat ? (
-                <span className="tiny muted mono">将于 {beat.label}</span>
-              ) : (
-                <span className="tiny dim">不会知晓</span>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function MockFactTrace({ factId, beatIdx }: { factId: string; beatIdx: number }) {
-  const fact = findFact(factId);
-  if (!fact) return null;
-  const knowers = MOCK_CHARACTERS
-    .map((c) => ({ c, since: MOCK_KNOWLEDGE[c.id]?.[factId] }))
-    .filter((x): x is { c: MockCharacter; since: string } => !!x.since)
-    .sort((a, b) => MOCK_ORDER[a.since] - MOCK_ORDER[b.since]);
-  return (
-    <div className="panel" style={{ padding: 18 }}>
-      <div className="row" style={{ marginBottom: 10 }}>
-        <div
-          style={{
-            width: 34,
-            height: 34,
-            borderRadius: 0,
-            background: "var(--seal-500)",
-            color: "#fff",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontFamily: "var(--font-song)",
-            fontSize: 13,
-          }}
-        >
-          事实
-        </div>
-        <div>
-          <div className="song" style={{ fontSize: 17, color: "var(--ink-900)" }}>
-            {fact.text}
-          </div>
-          <div className="tiny muted">事实传播链</div>
-        </div>
-      </div>
-      <div className="col" style={{ gap: 0 }}>
-        {knowers.map(({ c, since }, i) => {
-          const k = MOCK_ORDER[since] <= beatIdx;
-          const beat = findBeat(since);
-          return (
-            <div
-              key={c.id}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "30px 1fr auto",
-                gap: 10,
-                padding: "10px 0",
-              }}
-            >
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                <div
-                  style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: "50%",
-                    background: k ? "var(--seal-500)" : "transparent",
-                    border: "1.5px solid " + (k ? "var(--seal-500)" : "var(--ink-400)"),
-                  }}
-                />
-                {i < knowers.length - 1 && (
-                  <div
-                    style={{
-                      flex: 1,
-                      width: 1,
-                      background: "var(--divider-strong)",
-                      marginTop: 2,
-                    }}
-                  />
-                )}
-              </div>
-              <div>
-                <div
-                  className="song"
-                  style={{
-                    fontSize: 14,
-                    color: k ? "var(--ink-900)" : "var(--ink-500)",
-                  }}
-                >
-                  {c.name}
-                </div>
-                <div className="tiny muted">{ROLE_ZH[c.role]}</div>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <div
-                  className="song tiny"
-                  style={{ color: k ? "var(--ink-700)" : "var(--ink-500)" }}
-                >
-                  {beat?.label}
-                </div>
-                <div className="mono tiny muted">E{beat?.ep}</div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function CharacterHeader({ character }: { character: MockCharacter | RealCharacter }) {
-  const role = (character as MockCharacter).role;
+function CharacterHeader({ character }: { character: RealCharacter & { role?: string } }) {
+  const role = character.role;
   return (
     <div className="row" style={{ marginBottom: 10 }}>
       <div
@@ -715,14 +350,27 @@ function CharacterHeader({ character }: { character: MockCharacter | RealCharact
 // ---------------- LIVE (real backend) ----------------
 
 function BoundaryLive({ projectId }: { projectId: string }) {
-  const [snap, setSnap] = useState<BoundarySnapshot | null>(null);
-  const [beatIdx, setBeatIdx] = useState(0);
-  const [selChar, setSelChar] = useState<string | null>(null);
-  const [selFact, setSelFact] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Sync init from cache: in DEMO_ONLY the snapshot is preloaded, and
+  // in live mode subsequent visits skip the spinner entirely.
+  const cached = boundaryCache.get(projectId) ?? null;
+  const [snap, setSnap] = useState<BoundarySnapshot | null>(cached);
+  const [beatIdx, setBeatIdx] = useState(() =>
+    cached ? Math.max(0, cached.beats.length - 1) : 0,
+  );
+  const [selChar, setSelChar] = useState<string | null>(
+    cached ? cached.characters[0]?.uuid ?? null : null,
+  );
+  const [selFact, setSelFact] = useState<string | null>(
+    cached ? cached.facts[0] ?? null : null,
+  );
+  const [loading, setLoading] = useState(cached === null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (boundaryCache.has(projectId)) {
+      // Cache hit — already initialized via useState defaults above.
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -730,6 +378,7 @@ function BoundaryLive({ projectId }: { projectId: string }) {
       .get<BoundarySnapshot>(`/projects/${projectId}/boundary`)
       .then((s) => {
         if (cancelled) return;
+        boundaryCache.set(projectId, s);
         setSnap(s);
         setBeatIdx(Math.max(0, s.beats.length - 1));
         setSelChar(s.characters[0]?.uuid ?? null);

@@ -1,0 +1,73 @@
+name: Deploy static demo to GitHub Pages
+
+# Build the Vite frontend in DEMO_ONLY mode (no backend) and publish to
+# GitHub Pages. Triggered on push to main when web/, the snapshot script,
+# or this workflow itself changes — that way docs/CI-only commits don't
+# burn an Actions run.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "scripts/snapshot_bazong_demo.py"
+      - ".github/workflows/deploy-pages.yml"
+  workflow_dispatch:
+
+# GitHub Pages requires these elevated permissions on the deploy job; the
+# default GITHUB_TOKEN otherwise can't create deployments or sign the OIDC
+# token used by actions/deploy-pages.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one deploy at a time — cancel any in-flight run when a newer push
+# lands so we don't ship a stale build over a fresher one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build static demo
+        env:
+          VITE_DEMO_ONLY: "true"
+          VITE_BASE_PATH: /screenplay-memory-poc/
+        run: pnpm build
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

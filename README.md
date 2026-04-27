@@ -34,9 +34,23 @@
 
 推荐 macOS / Linux。Windows 用户建议在 WSL2 里跑。
 
-## 最简静态演示版
+## 静态演示版（GitHub Pages）
 
-如果只是给投资人、同事或远程评审看交互体验，**不需要 Docker / Neo4j / OpenRouter Key**。前端有一套内置示例数据，可以编译成纯静态站点：
+线上演示：<https://jiabins0303.github.io/screenplay-memory-poc/>
+
+构建流程：`scripts/snapshot_bazong_demo.py` 把后端真实跑出来的 `bazong_demo` 项目（双层图谱 + 认知边界 + 源剧本）冻结成 `web/src/mockdata.bazong.ts`，前端在 `VITE_DEMO_ONLY=true` 下用 mock 拦截 `api.ts` 的 fetch。布局位置在快照阶段用 `networkx.spring_layout` 预先算好，加载时跳过力导动画直接渲染。每次推到 `main` 分支且涉及 `web/`、快照脚本或 workflow 文件时，GitHub Actions 自动重新打包并发布。
+
+刷新示例数据（在本地 docker 后端跑过新的 ingest 后）：
+
+```bash
+docker compose up -d
+.venv/bin/python scripts/snapshot_bazong_demo.py
+git add web/src/mockdata.bazong.ts
+git commit -m "data: refresh bazong_demo snapshot"
+git push
+```
+
+本地预览静态构建：
 
 ```bash
 cd web
@@ -45,11 +59,10 @@ pnpm build:demo
 pnpm preview
 ```
 
-`pnpm build:demo` 会设置 `VITE_DEMO_ONLY=true`，生成的 `web/dist/` 可以直接部署到 GitHub Pages、Cloudflare Pages、Tencent EdgeOne Pages 等静态托管平台。静态演示版会：
+静态演示版会：
 
-- 展示示例项目、双层图谱、本体定义、认知边界矩阵和对话查询示例
-- 模拟剧本导入进度
-- 隐藏后端设置、新建真实项目和写入型编辑
+- 展示真实抽取出来的 `bazong_demo` 项目、双层图谱、本体定义、认知边界矩阵
+- 隐藏「新建项目」「保存本体」「重新导入」等会写入后端的按钮
 - 不发起任何 FastAPI / Neo4j / OpenRouter 请求
 
 真实抽取、真实查询和节点编辑仍然走下面的 Docker 后端流程。

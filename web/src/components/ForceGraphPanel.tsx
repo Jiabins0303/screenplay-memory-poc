@@ -235,6 +235,39 @@ export default function ForceGraphPanel({
         props: e.properties,
       }));
 
+    // Fast path: if every node carries a baked layout (snapshot from the
+    // static-pages build), skip the synchronous presettle entirely. The
+    // layout was computed deterministically by `scripts/snapshot_bazong_demo.py`
+    // and we just adopt it. Drag still works because wakeSim() unfreezes
+    // the simulation when the user grabs a node.
+    const allPositioned =
+      nodes.length > 0 &&
+      graph.nodes.every(
+        (n) =>
+          typeof n.properties.layout_x === "number" &&
+          typeof n.properties.layout_y === "number",
+      );
+
+    if (allPositioned) {
+      for (let i = 0; i < nodes.length; i++) {
+        const src = graph.nodes[i];
+        nodes[i].x = src.properties.layout_x as number;
+        nodes[i].y = src.properties.layout_y as number;
+        nodes[i].vx = 0;
+        nodes[i].vy = 0;
+      }
+      simRef.current = {
+        nodes,
+        edges,
+        drag: null,
+        hover: null,
+        hoverEdge: null,
+        frozen: true,
+        releaseTicks: 0,
+      };
+      return;
+    }
+
     // Seed positions on a jittered ring so the first few ticks don't
     // collapse the whole graph into a single pixel.
     const R = Math.max(120, Math.min(260, nodes.length * 8));

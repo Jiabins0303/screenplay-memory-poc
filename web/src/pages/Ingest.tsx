@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api, streamIngest } from "../api";
 import { DEMO_ONLY } from "../env";
 import { useUI } from "../store";
+import { MOCK_BAZONG_SOURCE_SCENES } from "../mockdata";
 
 interface SourceScene {
   episode_number: number;
@@ -113,8 +114,16 @@ export default function IngestPage() {
   // we just leave sourceScenes empty (the panel won't render).
   const projectIdForFetch = project?.id;
   useEffect(() => {
-    if (!projectIdForFetch || DEMO_ONLY) {
+    if (!projectIdForFetch) {
       setSourceScenes([]);
+      return;
+    }
+    if (DEMO_ONLY) {
+      setSourceScenes(
+        projectIdForFetch === "bazong_demo"
+          ? MOCK_BAZONG_SOURCE_SCENES.scenes
+          : [],
+      );
       return;
     }
     let cancelled = false;
