@@ -1,5 +1,9 @@
-// Graph page — dual 3D panels (detail above, beats below), filter rail on
-// the left, node inspector on the right when a node is selected.
+// Graph page — single 3D panel switched by a tab bar (detail / HL / bridge).
+//
+// Selection rule: at most one of {selectedNodeUuid, selectedEdgeUuid} is
+// non-null at any time. Picking a node clears edge selection and vice versa.
+// Switching tabs clears both. EdgeInspector wins over NodeInspector in render
+// priority — but mutual exclusivity means we never see both.
 //
 // For demo projects we generate a small graph from the mock data so users
 // who haven't ingested anything still see a populated view. Real projects
@@ -8,7 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { DEMO_ONLY } from "../env";
-import type { GraphDTO, NodeDTO } from "../types";
+import type { EdgeDTO, GraphDTO, Layer, NodeDTO } from "../types";
 import { useUI } from "../store";
 import {
   MOCK_BEATS,
@@ -18,6 +22,7 @@ import {
 import ForceGraphPanel from "../components/ForceGraphPanel";
 import FilterRail from "../components/FilterPanel";
 import NodeInspector from "../components/NodeInspector";
+import EdgeInspector from "../components/EdgeInspector";
 
 function buildMockDetailGraph(): GraphDTO {
   const nodes: NodeDTO[] = [];
@@ -82,6 +87,43 @@ function buildMockHlGraph(): GraphDTO {
   return { nodes, edges };
 }
 
+// Cross-layer mock: take the Beats from the HL mock and connect them to a
+// handful of Scenes via COVERS edges. Real bridge data may come back empty
+// when ``attach_beats_to_scenes`` produced no bridges yet — that's expected.
+function buildMockBridgeGraph(): GraphDTO {
+  const nodes: NodeDTO[] = [];
+  const edges: GraphDTO["edges"] = [];
+  for (const b of MOCK_BEATS) {
+    nodes.push({
+      uuid: b.id,
+      name: b.label,
+      labels: ["Beat"],
+      properties: { beat_type: b.type, tension_level: b.tension },
+    });
+  }
+  for (const s of MOCK_SCENES) {
+    nodes.push({
+      uuid: s.id,
+      name: `${s.ep}·${s.sc} ${s.title}`,
+      labels: ["Scene"],
+      properties: { episode_number: s.ep, scene_number: s.sc, location: s.loc },
+    });
+  }
+  // A few illustrative COVERS edges so the bridge tab isn't empty in demo mode.
+  const covers: Array<[string, string]> = [
+    ["b-inciting", MOCK_SCENES[0]?.id ?? ""],
+    ["b-discovery", MOCK_SCENES[1]?.id ?? ""],
+    ["b-revelation", MOCK_SCENES[2]?.id ?? ""],
+    ["b-climax", MOCK_SCENES[Math.min(3, MOCK_SCENES.length - 1)]?.id ?? ""],
+    ["b-resolution", MOCK_SCENES[MOCK_SCENES.length - 1]?.id ?? ""],
+  ];
+  for (const [bid, sid] of covers) {
+    if (!sid) continue;
+    edges.push({ uuid: `${bid}-covers-${sid}`, source: bid, target: sid, type: "COVERS", properties: {} });
+  }
+  return { nodes, edges };
+}
+
 function filterGraph(graph: GraphDTO, hidden: Set<string>): GraphDTO {
   if (hidden.size === 0) return graph;
   const visible = graph.nodes.filter((n) => n.labels.every((l) => !hidden.has(l)));
@@ -92,12 +134,24 @@ function filterGraph(graph: GraphDTO, hidden: Set<string>): GraphDTO {
   };
 }
 
+const LAYER_TITLE: Record<Layer, string> = {
+  detail: "详细图谱",
+  hl: "节拍图谱",
+  bridge: "桥接视图",
+};
+
+const LAYER_LIMIT: Record<Layer, number> = {
+  detail: 500,
+  hl: 200,
+  bridge: 500,
+};
+
 export default function GraphPage() {
   const project = useUI((s) => s.project);
-  const [detail, setDetail] = useState<GraphDTO>({ nodes: [], edges: [] });
-  const [hl, setHl] = useState<GraphDTO>({ nodes: [], edges: [] });
-  const [selectedDetail, setSelectedDetail] = useState<string | null>(null);
-  const [selectedHl, setSelectedHl] = useState<string | null>(null);
+  const [layer, setLayer] = useState<Layer>("detail");
+  const [graph, setGraph] = useState<GraphDTO>({ nodes: [], edges: [] });
+  const [selectedNodeUuid, setSelectedNodeUuid] = useState<string | null>(null);
+  const [selectedEdgeUuid, setSelectedEdgeUuid] = useState<string | null>(null);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
@@ -105,38 +159,46 @@ export default function GraphPage() {
     if (!project) return;
     setError(null);
     if (DEMO_ONLY || project.demo) {
-      setDetail(buildMockDetailGraph());
-      setHl(buildMockHlGraph());
+      if (layer === "detail") setGraph(buildMockDetailGraph());
+      else if (layer === "hl") setGraph(buildMockHlGraph());
+      else setGraph(buildMockBridgeGraph());
       return;
     }
     try {
-      const [d, h] = await Promise.all([
-        api.get<GraphDTO>(`/projects/${project.id}/graph?layer=detail&limit=500`),
-        api.get<GraphDTO>(`/projects/${project.id}/graph?layer=hl&limit=200`),
-      ]);
-      setDetail(d);
-      setHl(h);
+      const g = await api.get<GraphDTO>(
+        `/projects/${project.id}/graph?layer=${layer}&limit=${LAYER_LIMIT[layer]}`,
+      );
+      setGraph(g);
     } catch (e) {
       setError(String(e));
     }
-  }, [project]);
+  }, [project, layer]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
 
-  const filteredDetail = useMemo(
-    () => filterGraph(detail, hidden),
-    [detail, hidden],
+  // Clear any selection when the layer changes — uuids are layer-scoped, so
+  // a stale uuid from a previous tab would silently miss in the new graph.
+  useEffect(() => {
+    setSelectedNodeUuid(null);
+    setSelectedEdgeUuid(null);
+  }, [layer]);
+
+  const filtered = useMemo(
+    () => filterGraph(graph, hidden),
+    [graph, hidden],
   );
-  const filteredHl = useMemo(() => filterGraph(hl, hidden), [hl, hidden]);
 
   const selectedNode: NodeDTO | null = useMemo(() => {
-    if (selectedDetail)
-      return detail.nodes.find((n) => n.uuid === selectedDetail) ?? null;
-    if (selectedHl) return hl.nodes.find((n) => n.uuid === selectedHl) ?? null;
-    return null;
-  }, [selectedDetail, selectedHl, detail, hl]);
+    if (!selectedNodeUuid) return null;
+    return graph.nodes.find((n) => n.uuid === selectedNodeUuid) ?? null;
+  }, [selectedNodeUuid, graph]);
+
+  const selectedEdge: EdgeDTO | null = useMemo(() => {
+    if (!selectedEdgeUuid) return null;
+    return graph.edges.find((e) => e.uuid === selectedEdgeUuid) ?? null;
+  }, [selectedEdgeUuid, graph]);
 
   if (!project) {
     return <div style={{ padding: 40, color: "var(--ink-500)" }}>先选择或新建项目。</div>;
@@ -151,67 +213,130 @@ export default function GraphPage() {
     });
   }
 
+  // Selection helpers — every entry point goes through these so the
+  // mutual-exclusivity invariant is enforced in one place.
+  function selectNode(uuid: string | null) {
+    setSelectedNodeUuid(uuid);
+    if (uuid !== null) setSelectedEdgeUuid(null);
+  }
+  function selectEdge(uuid: string | null) {
+    setSelectedEdgeUuid(uuid);
+    if (uuid !== null) setSelectedNodeUuid(null);
+  }
+  function clearAllSelection() {
+    setSelectedNodeUuid(null);
+    setSelectedEdgeUuid(null);
+  }
+
+  // Neighbor / endpoint pivot from the inspector — always lands on a node in
+  // the current panel since there is only one panel.
+  function pivotToNode(uuid: string) {
+    selectNode(uuid);
+  }
+
+  const showInspector = selectedNode || selectedEdge;
+
   return (
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "188px 1fr" + (selectedNode ? " 320px" : ""),
+        // ``minmax(0, 1fr)`` instead of bare ``1fr`` is the load-bearing
+        // bit: grid items default to ``min-width: auto`` which expands to
+        // the content's intrinsic size. Our middle column hosts a canvas
+        // with ``width:100%``, which under bare ``1fr`` blew the column
+        // out to the canvas's natural width and pushed the third (320px
+        // inspector) column off-screen — selecting a node looked like a
+        // no-op even though state was updating. ``minmax(0, …)`` lets
+        // the track shrink so the inspector column fits.
+        gridTemplateColumns:
+          "188px minmax(0, 1fr)" + (showInspector ? " 320px" : ""),
         height: "100%",
         minHeight: 0,
       }}
     >
       <FilterRail
-        detailNodes={detail.nodes}
-        hlNodes={hl.nodes}
+        detailNodes={layer === "detail" ? graph.nodes : []}
+        hlNodes={layer === "hl" || layer === "bridge" ? graph.nodes : []}
         hidden={hidden}
         onToggle={toggle}
         onRefresh={refresh}
       />
-      <div style={{ display: "grid", gridTemplateRows: "1fr 1fr", minHeight: 0 }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 0,
+          minWidth: 0,
+        }}
+      >
         <div
           style={{
-            position: "relative",
+            display: "flex",
             borderBottom: "1px solid var(--divider)",
-            minHeight: 0,
+            background: "#fff",
+            flexShrink: 0,
           }}
         >
-          <ForceGraphPanel
-            graph={filteredDetail}
-            selectedUuid={selectedDetail}
-            onSelect={(u) => {
-              setSelectedDetail(u);
-              setSelectedHl(null);
-            }}
-            title="详细图谱"
-            inkStyle={false}
-          />
+          {(["detail", "hl", "bridge"] as Layer[]).map((L) => {
+            const active = layer === L;
+            return (
+              <button
+                key={L}
+                onClick={() => setLayer(L)}
+                style={{
+                  padding: "10px 18px",
+                  background: active ? "var(--ink-000)" : "transparent",
+                  color: active ? "var(--char-500)" : "var(--ink-600)",
+                  fontWeight: active ? 700 : 500,
+                  fontSize: 13,
+                  cursor: "pointer",
+                  border: "none",
+                  borderBottom: active
+                    ? "2px solid var(--char-500)"
+                    : "2px solid transparent",
+                }}
+              >
+                {LAYER_TITLE[L]}
+                <span className="tiny muted" style={{ marginLeft: 6 }}>
+                  · {active ? graph.nodes.length : 0} 节点 · {active ? graph.edges.length : 0} 边
+                </span>
+              </button>
+            );
+          })}
         </div>
-        <div style={{ position: "relative", minHeight: 0 }}>
+        <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
           <ForceGraphPanel
-            graph={filteredHl}
-            selectedUuid={selectedHl}
-            onSelect={(u) => {
-              setSelectedHl(u);
-              setSelectedDetail(null);
-            }}
-            title="高层图谱"
+            graph={filtered}
+            selectedUuid={selectedNodeUuid}
+            onSelect={selectNode}
+            selectedEdgeUuid={selectedEdgeUuid}
+            onSelectEdge={selectEdge}
+            title={LAYER_TITLE[layer]}
             inkStyle={false}
           />
         </div>
       </div>
-      {selectedNode && (
+      {selectedEdge ? (
+        <EdgeInspector
+          projectId={project.id}
+          demo={DEMO_ONLY || !!project.demo}
+          edge={selectedEdge}
+          graph={filtered}
+          onRefresh={refresh}
+          onClose={clearAllSelection}
+          onSelectNode={pivotToNode}
+        />
+      ) : selectedNode ? (
         <NodeInspector
           projectId={project.id}
           demo={DEMO_ONLY || !!project.demo}
           node={selectedNode}
-          graph={selectedDetail ? filteredDetail : filteredHl}
+          graph={filtered}
           onRefresh={refresh}
-          onClose={() => {
-            setSelectedDetail(null);
-            setSelectedHl(null);
-          }}
+          onClose={clearAllSelection}
+          onSelectNeighbor={pivotToNode}
         />
-      )}
+      ) : null}
       {error && (
         <div
           style={{

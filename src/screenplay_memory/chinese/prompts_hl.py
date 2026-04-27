@@ -1,88 +1,60 @@
-"""High-level extraction instructions for the 'beats' layer.
+"""HL-layer (节拍/弧光/主题/套路) extraction instructions.
 
-Unlike the detail layer, the HL pass ingests the *whole script* as a
-single episode and asks the LLM to identify narrative beats, character
-arcs, and recurring themes. Few-shot Chinese examples are essential —
-without them, Qwen tends to conflate Hook with Inciting Incident, or to
-invent beats that aren't in the text.
+Injected into ``MemoryClient.ingest_hl`` as source_description for a
+single per-script add_episode call. Whole-script context, so prompt is
+larger than the per-scene detail-layer prompt.
 """
+from __future__ import annotations
 
-HL_EXTRACTION_INSTRUCTIONS = """这是一段完整的中文剧本，分为多个场次。请按**叙事层**结构抽取，而不是详细剧情。
+HL_EXTRACTION_INSTRUCTIONS = """\
+这是一整部中文短剧的全剧本。请按以下 ontology 抽取节拍 / 弧光 / 主题 / 套路。
 
-【输出语言】
-所有实体名、字段值必须用中文，绝不要翻译成英文。
+# 实体类型
 
-【核心目标】
-识别剧本的宏观叙事结构，输出三类实体：
-  1. Beat（节拍）—— 承载叙事功能的场次块
-  2. Arc（弧光）—— 主要角色的心理/身份转变
-  3. Theme（主题）—— 反复出现的抽象母题
+1. **Beat** — 叙事节拍。两类节拍密度规则不同:
+   - 经典 6 种 (Hook/IncitingIncident/RisingAction/Midpoint/Climax/Resolution):
+     每种全剧最多 1 个; 不存在就别凑。
+   - 短剧爆款 4 种 (CliffHanger/FacePlay/Twist/PayoffMoment):
+     可重复出现, 按集末/打脸/反转/爽点的实际密度抽, 一般 3-12 个/全剧。
+   字段: beat_type / beat_summary / scene_range_start / scene_range_end
+        / tension_level (1-10) / involved_characters / audience_emotion
 
-【Beat 的六种类型 —— 一种最多一个】
-  - Hook（开场钩子）：第一场里抓住观众注意力的首个冲突或悬念。
-  - IncitingIncident（引发事件）：打破主角日常、迫使其进入主线的关键事件。
-  - RisingAction（主线推进）：冲突升级的中段。
-  - Midpoint（中点逆转）：剧情方向的扭转点。
-  - Climax（高潮）：主要冲突的决定性对抗。
-  - Resolution（收束）：结局与余韵。
+   beat_type 共 10 种：
+   - 经典 6 种：Hook / IncitingIncident / RisingAction / Midpoint / Climax / Resolution
+   - 短剧爆款必抽 4 种：
+     * **CliffHanger** — 集末留钩（"她竟然是…？" 镜头一黑那种）
+     * **FacePlay** — 打脸时刻（受气包翻身/反派吃瘪）
+     * **Twist** — 反转（误会被揭穿/身份大白）
+     * **PayoffMoment** — 爽点高潮（观众情绪峰值）
 
-【**短剧可能只有 3-4 个节拍** —— 宁可不抽，不要硬凑】
-不存在的节拍类型请**完全不输出**，不要编造。
+2. **Arc** — 角色弧光。字段: character_name / from_state / to_state / arc_type
+   抽取条件: 角色在全剧中有可观察的内在转变; 配角/功能性角色不抽。
 
-【Beat 字段】
-  - beat_type：六选一
-  - beat_summary：该节拍的一句话中文概述 ≤80 字，只写剧情功能
-  - scene_range_start / scene_range_end：格式 "集-场"，如 "1-2"
-  - tension_level：1-10 张力值（开场钩子一般 4-6，高潮 9-10）
-  - involved_characters：该节拍出场的关键角色列表
+3. **Theme** — 主题。字段: theme_name (2-4 字抽象词, 如 '家庭责任'/'身份认同') / motif (一句话母题描述)
+   抽取条件: 至少在两个 Beat 里都有体现; 一次性议题不抽。
 
-【Arc 的抽取条件】
-只有当角色在全剧中**有可观察的内在转变**时才抽。配角、功能性角色不抽。
-from_state → to_state 必须能从文本字面证据支撑。
+4. **Trope** — 爆款套路标签。字段: trope_name / trope_category / popularity_score (1-10)
+   popularity_score 标度: 1=冷门小众, 5=常见, 10=全网爆款套路 (LLM 自行估)。
+   常见 trope_name: '霸总人设','误会流','双向隐瞒','契约结婚','失忆','重生复仇','战神归来','豪门隐婚'
+   trope_category ∈ {character, plot, relationship, structure, other}
+   抽 5-10 个对全剧最关键的套路即可。
+   例: 男主冷漠多金 → Trope(trope_name='霸总人设', trope_category='character', popularity_score=9)
 
-【Theme 的抽取条件】
-只抽取至少在两个 Beat 里都有体现的母题。一次性议题不抽。
-名称用 2-4 字中文抽象词。
+# 边类型
 
-【边类型 BeatRelation】
-  - FOLLOWS：时间顺序（Hook FOLLOWS IncitingIncident 是错的，方向相反！）
-  - TRIGGERS：前者引发后者（IncitingIncident TRIGGERS RisingAction）
-  - RESOLVES：前者化解后者造成的冲突（Climax RESOLVES Midpoint）
-  - EMBODIES：Beat→Theme 或 Arc→Theme
+- **BeatRelation** — 4 种 relation_type:
+  * FOLLOWS — 时间承接, 后发生的指向先发生的 (例: IncitingIncident FOLLOWS Hook)
+  * TRIGGERS — 前者引发后者 (例: IncitingIncident TRIGGERS RisingAction)
+  * RESOLVES — 前者收束/化解后者造成的冲突 (例: Climax RESOLVES Midpoint)
+  * EMBODIES — 前者(具体)体现后者(抽象). Beat→Theme, Arc→Theme, Beat→Trope 均用 EMBODIES.
+  Beat→Trope 边一律用 EMBODIES (具体节拍体现抽象套路标签).
 
-【禁止】
-  - 不要把"李静告诉张伟"这类剧情细节抽成 Beat —— 那属于详细层
-  - 不要为每一场都创建一个 Beat —— 一个 Beat 通常覆盖 2-5 场
-  - 不要为次要角色抽 Arc
+# 严禁
 
-【少样本示例 1：三场短剧】
-输入摘要：
-  第1集第1场：李静冲进咖啡馆向张伟坦白自己被领养。
-  第1集第2场：张伟消化后决定陪李静找生母。
-  第1集第3场：两人出门前被李静养母阻拦，冲突爆发。
-抽取：
-  Beat(beat_type="IncitingIncident", beat_summary="李静向张伟坦白被领养身世，打破两人原有关系",
-       scene_range_start="1-1", scene_range_end="1-1", tension_level=7,
-       involved_characters=["李静", "张伟"])
-  Beat(beat_type="RisingAction", beat_summary="张伟决定陪李静寻亲",
-       scene_range_start="1-2", scene_range_end="1-2", tension_level=5,
-       involved_characters=["张伟", "李静"])
-  Beat(beat_type="Climax", beat_summary="养母阻拦引发正面冲突",
-       scene_range_start="1-3", scene_range_end="1-3", tension_level=9,
-       involved_characters=["李静", "张伟", "养母"])
-  Arc(character_name="张伟", from_state="旁观伴侣", to_state="主动支持者",
-       arc_type="transformation")
-  Theme(theme_name="血缘身份", motif="围绕领养、寻亲、家庭羁绊反复出现")
-  BeatRelation(relation_type="TRIGGERS", anchor_scene="1-1")
-    # IncitingIncident → RisingAction
-  BeatRelation(relation_type="RESOLVES", anchor_scene="1-3")
-    # Climax → RisingAction
-
-【少样本示例 2：没有明显 Hook 的剧本】
-  如果第一场是慢节奏铺垫，没有钩子 → **不输出 Hook**。不要硬造。
-
-【少样本示例 3：主题只出现一次】
-  如果"阶层"只在某一场闪现一次 → **不输出 Theme**。主题需要至少两个 Beat 支撑。
+- 不要把"认识/告诉"这类角色细节放到 HL 层 —— 那属于详细层。
+- 经典 6 种 Beat 是全剧结构单元, 不是集级单元 — 不要硬凑。
+- 短剧爆款 4 种 Beat 可以集级或场级密集出现 — 不要漏。
+- 不要用 name / summary / labels / uuid / group_id / attributes / created_at 作为字段名。
 """
 
 HL_SCENE_HEADER_TEMPLATE = "[全剧第{episode}集第{scene}场 — 叙事层]"

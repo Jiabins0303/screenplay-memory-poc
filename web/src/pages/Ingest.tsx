@@ -5,10 +5,16 @@
 // Segmentation falls through five patterns so a random Chinese script
 // uploaded as-is still breaks cleanly into scenes; see `segment` below.
 
-import { useMemo, useRef, useState } from "react";
-import { streamIngest } from "../api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { api, streamIngest } from "../api";
 import { DEMO_ONLY } from "../env";
 import { useUI } from "../store";
+
+interface SourceScene {
+  episode_number: number;
+  scene_number: number;
+  content: string;
+}
 
 interface SceneRow {
   ep: number;
@@ -96,9 +102,34 @@ export default function IngestPage() {
   const [runHl, setRunHl] = useState(true);
   const [progress, setProgress] = useState<ProgressRow[]>([]);
   const [overall, setOverall] = useState<"idle" | "running" | "done">("idle");
+  const [sourceScenes, setSourceScenes] = useState<SourceScene[]>([]);
   const abortRef = useRef<AbortController | null>(null);
 
   const scenes = useMemo(() => segment(raw), [raw]);
+
+  // Fetch the read-only source script for demo projects so a viewer can
+  // see "this is the source script" alongside the graph. The endpoint is
+  // restricted server-side to bazong_demo today; other projects 404 and
+  // we just leave sourceScenes empty (the panel won't render).
+  const projectIdForFetch = project?.id;
+  useEffect(() => {
+    if (!projectIdForFetch || DEMO_ONLY) {
+      setSourceScenes([]);
+      return;
+    }
+    let cancelled = false;
+    api
+      .get<{ scenes: SourceScene[] }>(`/projects/${projectIdForFetch}/ingest/source-scenes`)
+      .then((res) => {
+        if (!cancelled) setSourceScenes(res.scenes);
+      })
+      .catch(() => {
+        if (!cancelled) setSourceScenes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectIdForFetch]);
 
   if (!project) {
     return <div style={{ padding: 40, color: "var(--ink-500)" }}>先选择或新建项目。</div>;
@@ -216,12 +247,24 @@ export default function IngestPage() {
 
   return (
     <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        minHeight: 0,
+        overflow: "auto",
+      }}
+    >
+    <div
       className="stagger-in"
       style={{
         display: "grid",
         gridTemplateColumns: "minmax(0, 1fr) 424px",
-        height: "100%",
-        minHeight: 0,
+        // The outer wrapper is now scrollable, so this inner grid can
+        // grow to its natural height instead of being clipped to 100%.
+        // We keep a generous min-height so the editor / progress columns
+        // still feel like the primary surface above the source preview.
+        minHeight: "min(680px, calc(100vh - 120px))",
         background:
           "linear-gradient(90deg, var(--hairline) 1px, transparent 1px), linear-gradient(180deg, var(--hairline) 1px, transparent 1px), var(--ink-050)",
         backgroundSize: "calc(100% / 12) 100%, 64px 64px, auto",
@@ -454,7 +497,94 @@ export default function IngestPage() {
         </div>
       </aside>
     </div>
+    {sourceScenes.length > 0 && <SourceScenesPanel scenes={sourceScenes} />}
+    </div>
   );
+}
+
+function SourceScenesPanel({ scenes }: { scenes: SourceScene[] }) {
+  const total = scenes.length;
+  const episodes = Array.from(new Set(scenes.map((s) => s.episode_number))).length;
+  return (
+    <section
+      style={{
+        padding: "28px 32px",
+        borderTop: "1px solid var(--divider)",
+        background: "#fff",
+      }}
+    >
+      <div className="row" style={{ marginBottom: 14 }}>
+        <div className="mono" style={{ color: "#e4002b", fontWeight: 700 }}>
+          03C
+        </div>
+        <div>
+          <div style={{ fontSize: 18, color: "var(--ink-900)", fontWeight: 700 }}>
+            源剧本（{episodes}集 × {Math.ceil(total / Math.max(1, episodes))}场，演示用）
+          </div>
+          <div className="muted tiny" style={{ marginTop: 2 }}>
+            点击展开任意场次以查看原文（只读）
+          </div>
+        </div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {scenes.map((s) => (
+          <details
+            key={`${s.episode_number}-${s.scene_number}`}
+            style={{
+              border: "1px solid var(--divider)",
+              background: "var(--ink-050)",
+              padding: "8px 12px",
+              fontSize: 13,
+            }}
+          >
+            <summary
+              style={{
+                cursor: "pointer",
+                color: "var(--ink-800)",
+                fontWeight: 600,
+                userSelect: "none",
+              }}
+            >
+              <span className="mono" style={{ color: "var(--ink-500)", marginRight: 10 }}>
+                E{String(s.episode_number).padStart(2, "0")} · S
+                {String(s.scene_number).padStart(2, "0")}
+              </span>
+              {firstHeaderLine(s.content)}
+            </summary>
+            <pre
+              className="song"
+              style={{
+                marginTop: 10,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                color: "var(--ink-800)",
+                fontFamily: "var(--font-sans)",
+                fontSize: 13,
+                lineHeight: 1.7,
+                background: "#fff",
+                padding: "12px 14px",
+                border: "1px solid var(--divider)",
+              }}
+            >
+              {s.content}
+            </pre>
+          </details>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function firstHeaderLine(content: string): string {
+  // Surface the scene header (e.g. "凯悦酒店大堂 · 上午") instead of the
+  // raw first line which often contains the bracketed "【第X集第Y场】"
+  // marker. Best-effort — fall back to the raw first non-empty line.
+  const lines = content.split(/\n/).map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return "(空场)";
+  const head = lines[0];
+  // Strip "【第1集第1场】" prefix if present, keep "场景: X / 时间: Y".
+  const stripped = head.replace(/^【第\d+集第\d+场】\s*/, "");
+  return stripped.length > 60 ? stripped.slice(0, 60) + "…" : stripped;
 }
 
 function TimelineRow({ row, last }: { row: ProgressRow | SceneRow; last: boolean }) {

@@ -778,13 +778,16 @@ function BoundaryLive({ projectId }: { projectId: string }) {
   if (loading) return <CenteredNote>正在加载图谱…</CenteredNote>;
   if (error) {
     const missingChars = error.includes("Character");
-    const missingBeats = error.includes("Beat");
+    // The API now falls back to Scene nodes when the HL layer is empty,
+    // so a "no Beat" 404 only fires when both Beat and Scene are missing
+    // — meaning detail-layer ingest hasn't run.
+    const missingTimeline = error.includes("Beat") || error.includes("Scene");
     return (
       <CenteredNote>
         {missingChars
           ? "尚无角色节点。先在「导入」页运行一次 ingest 让详细层落地数据。"
-          : missingBeats
-          ? "节拍层为空。在「导入」页勾选「同步生成节拍层」后重跑一次。"
+          : missingTimeline
+          ? "尚无可用时间轴。先在「导入」页运行一次 ingest 让详细层落地至少一个场景。"
           : `加载失败：${error}`}
       </CenteredNote>
     );

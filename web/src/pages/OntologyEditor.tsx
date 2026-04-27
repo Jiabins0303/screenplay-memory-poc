@@ -19,6 +19,11 @@ import {
 } from "../mockdata";
 import type { Layer, OntologyResponse, OntologySpec } from "../types";
 
+// Ontology editing only applies to the two real KG layers; the "bridge"
+// layer is a runtime cross-layer view of detail+hl edges, not a separately
+// configurable schema.
+type OntologyLayer = Exclude<Layer, "bridge">;
+
 // Convert backend spec shape to the mock-style used by the design components.
 function toMock(spec: OntologySpec): MockOntology {
   const conv = (es: OntologySpec["entities"]): MockOntologyEntity[] =>
@@ -50,7 +55,7 @@ function toMock(spec: OntologySpec): MockOntology {
 
 export default function OntologyPage() {
   const project = useUI((s) => s.project);
-  const [layer, setLayer] = useState<Layer>("detail");
+  const [layer, setLayer] = useState<OntologyLayer>("detail");
   const [spec, setSpec] = useState<MockOntology | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -259,8 +264,8 @@ function LayerToggle({
   layer,
   onChange,
 }: {
-  layer: Layer;
-  onChange: (l: Layer) => void;
+  layer: OntologyLayer;
+  onChange: (l: OntologyLayer) => void;
 }) {
   return (
     <div
@@ -273,8 +278,8 @@ function LayerToggle({
       }}
     >
       {[
-        { v: "detail" as Layer, l: "详细层" },
-        { v: "hl" as Layer, l: "节拍层" },
+        { v: "detail" as OntologyLayer, l: "详细层" },
+        { v: "hl" as OntologyLayer, l: "节拍层" },
       ].map((o) => (
         <button
           key={o.v}

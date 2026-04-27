@@ -168,8 +168,47 @@ async def get_boundary(
     if not characters:
         raise HTTPException(404, "no Character nodes — ingest a script first")
     if not beats:
+        # Fallback: use Scene nodes from the detail layer as the timeline.
+        # The HL layer is optional in the bazong_demo workflow — it's a
+        # separate ``ingest_hl`` pass — but every detail-layer ingest
+        # creates a Scene per episode/scene pair via the synthesised
+        # SCENE_HEADER_TEMPLATE. Treat each Scene like a synthetic beat
+        # so the matrix can still render. ``tension`` defaults to 3 and
+        # ``type`` is empty; the frontend already tolerates both.
+        async with graphiti.driver.session() as sess:
+            scene_rows = await sess.run(
+                """
+                MATCH (n) WHERE n.group_id = $gid
+                  AND 'Scene' IN labels(n)
+                  AND n.episode_number IS NOT NULL
+                  AND n.scene_number IS NOT NULL
+                RETURN n.uuid AS uuid,
+                       coalesce(n.name, '') AS label,
+                       n.episode_number AS ep,
+                       n.scene_number   AS sc
+                """,
+                gid=detail_gid,
+            )
+            scene_raw = [dict(r) async for r in scene_rows]
+        for s in scene_raw:
+            ep = int(s.get("ep") or 0)
+            sc = int(s.get("sc") or 0)
+            beats.append(
+                {
+                    "uuid": s["uuid"],
+                    "label": s.get("label") or f"第{ep}集第{sc}场",
+                    "type": "Scene",
+                    "tension": 3,
+                    "episode": ep,
+                    "scene_end_ep": ep,
+                    "scene_end_sc": sc,
+                }
+            )
+        beats.sort(key=lambda x: (x["episode"], x["scene_end_sc"]))
+    if not beats:
         raise HTTPException(
-            404, "no Beat nodes — run ingest with run_hl=true first"
+            404,
+            "no Beat or Scene nodes — ingest a script first",
         )
 
     # Step 3: per-character search (O(N)), then filter by cutoff per beat.

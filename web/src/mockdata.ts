@@ -220,6 +220,14 @@ export const KIND_ZH: Record<string, string> = {
   Beat: "节拍",
   Arc: "弧光",
   Theme: "主题",
+  Identity: "身份",
+  Family: "家族",
+  Organization: "组织",
+  Location: "场所",
+  Item: "道具",
+  Misunderstanding: "误会",
+  Secret: "秘密",
+  Trope: "套路",
 };
 
 export const KIND_COLOR: Record<string, string> = {
