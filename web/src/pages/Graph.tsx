@@ -240,7 +240,16 @@ export default function GraphPage() {
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "188px 1fr" + (showInspector ? " 320px" : ""),
+        // ``minmax(0, 1fr)`` instead of bare ``1fr`` is the load-bearing
+        // bit: grid items default to ``min-width: auto`` which expands to
+        // the content's intrinsic size. Our middle column hosts a canvas
+        // with ``width:100%``, which under bare ``1fr`` blew the column
+        // out to the canvas's natural width and pushed the third (320px
+        // inspector) column off-screen — selecting a node looked like a
+        // no-op even though state was updating. ``minmax(0, …)`` lets
+        // the track shrink so the inspector column fits.
+        gridTemplateColumns:
+          "188px minmax(0, 1fr)" + (showInspector ? " 320px" : ""),
         height: "100%",
         minHeight: 0,
       }}
@@ -252,7 +261,14 @@ export default function GraphPage() {
         onToggle={toggle}
         onRefresh={refresh}
       />
-      <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 0,
+          minWidth: 0,
+        }}
+      >
         <div
           style={{
             display: "flex",

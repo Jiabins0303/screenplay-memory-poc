@@ -151,6 +151,12 @@ interface SimState {
   drag: { id: string; n: SimNode } | null;
   hover: string | null;
   hoverEdge: string | null;
+  // Auto-freeze: once total kinetic energy stays below KE_FREEZE_THRESHOLD
+  // for KE_FREEZE_TICKS consecutive ticks we flip ``frozen`` and stop
+  // integrating physics. User interaction (drag, click, resize, data
+  // change) resets ``stableTicks`` and clears ``frozen``.
+  frozen: boolean;
+  stableTicks: number;
 }
 
 const REPEL = 1800;
@@ -158,6 +164,9 @@ const SPRING = 0.02;
 const IDEAL_LEN = 78;
 const DAMP = 0.86;
 const CENTER = 0.012;
+
+const KE_FREEZE_THRESHOLD = 0.5;
+const KE_FREEZE_TICKS = 30;
 
 export default function ForceGraphPanel({
   graph,
@@ -224,7 +233,15 @@ export default function ForceGraphPanel({
       n.y = Math.sin(a) * R * (0.6 + Math.random() * 0.4);
     });
 
-    simRef.current = { nodes, edges, drag: null, hover: null, hoverEdge: null };
+    simRef.current = {
+      nodes,
+      edges,
+      drag: null,
+      hover: null,
+      hoverEdge: null,
+      frozen: false,
+      stableTicks: 0,
+    };
   }, [graph]);
 
   // DPR-aware canvas sizing via ResizeObserver.
@@ -243,6 +260,11 @@ export default function ForceGraphPanel({
         canvas.style.height = height + "px";
         const ctx = canvas.getContext("2d");
         if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        // Resize may shift the visible area; let the simulation breathe.
+        if (simRef.current) {
+          simRef.current.frozen = false;
+          simRef.current.stableTicks = 0;
+        }
       }
     });
     ro.observe(wrap);
@@ -261,17 +283,44 @@ export default function ForceGraphPanel({
         return;
       }
       const { nodes, edges, drag } = sim;
+      // We always need the id→node map for rendering even when physics is
+      // skipped — declare it outside the freeze gate so the render block
+      // below can reach it.
+      const idToNode = new Map(nodes.map((n) => [n.id, n]));
 
-      // Repulsion (pairwise, O(N²) — fine at <500 nodes).
-      for (let i = 0; i < nodes.length; i++) {
-        for (let j = i + 1; j < nodes.length; j++) {
-          const a = nodes[i];
-          const b = nodes[j];
-          const dx = a.x - b.x;
-          const dy = a.y - b.y;
-          const d2 = dx * dx + dy * dy + 0.01;
-          const d = Math.sqrt(d2);
-          const f = REPEL / d2;
+      // Auto-freeze gate: skip physics integration once the simulation
+      // has settled. Dragging always re-runs physics so the dragged node
+      // can pull its neighbours along; otherwise we just render.
+      if (!sim.frozen || drag) {
+        // Repulsion (pairwise, O(N²) — fine at <500 nodes).
+        for (let i = 0; i < nodes.length; i++) {
+          for (let j = i + 1; j < nodes.length; j++) {
+            const a = nodes[i];
+            const b = nodes[j];
+            const dx = a.x - b.x;
+            const dy = a.y - b.y;
+            const d2 = dx * dx + dy * dy + 0.01;
+            const d = Math.sqrt(d2);
+            const f = REPEL / d2;
+            const fx = (dx / d) * f;
+            const fy = (dy / d) * f;
+            a.vx += fx;
+            a.vy += fy;
+            b.vx -= fx;
+            b.vy -= fy;
+          }
+        }
+
+        // Spring along edges.
+        for (const e of edges) {
+          const a = idToNode.get(e.source);
+          const b = idToNode.get(e.target);
+          if (!a || !b) continue;
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
+          const diff = d - IDEAL_LEN;
+          const f = diff * SPRING;
           const fx = (dx / d) * f;
           const fy = (dy / d) * f;
           a.vx += fx;
@@ -279,40 +328,43 @@ export default function ForceGraphPanel({
           b.vx -= fx;
           b.vy -= fy;
         }
-      }
 
-      // Spring along edges.
-      const idToNode = new Map(nodes.map((n) => [n.id, n]));
-      for (const e of edges) {
-        const a = idToNode.get(e.source);
-        const b = idToNode.get(e.target);
-        if (!a || !b) continue;
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
-        const diff = d - IDEAL_LEN;
-        const f = diff * SPRING;
-        const fx = (dx / d) * f;
-        const fy = (dy / d) * f;
-        a.vx += fx;
-        a.vy += fy;
-        b.vx -= fx;
-        b.vy -= fy;
-      }
-
-      // Center pull + damp + integrate.
-      for (const n of nodes) {
-        if (drag && drag.id === n.id) {
-          n.vx = 0;
-          n.vy = 0;
-          continue;
+        // Center pull + damp + integrate. Track total kinetic energy so we
+        // can decide whether to freeze on the next tick.
+        let ke = 0;
+        for (const n of nodes) {
+          if (drag && drag.id === n.id) {
+            n.vx = 0;
+            n.vy = 0;
+            continue;
+          }
+          n.vx -= n.x * CENTER;
+          n.vy -= n.y * CENTER;
+          n.vx *= DAMP;
+          n.vy *= DAMP;
+          n.x += n.vx;
+          n.y += n.vy;
+          ke += n.vx * n.vx + n.vy * n.vy;
         }
-        n.vx -= n.x * CENTER;
-        n.vy -= n.y * CENTER;
-        n.vx *= DAMP;
-        n.vy *= DAMP;
-        n.x += n.vx;
-        n.y += n.vy;
+
+        // Drag forces a wake-up; otherwise count consecutive low-KE ticks
+        // and flip ``frozen`` once we cross the threshold.
+        if (drag) {
+          sim.stableTicks = 0;
+          sim.frozen = false;
+        } else if (ke < KE_FREEZE_THRESHOLD) {
+          sim.stableTicks += 1;
+          if (sim.stableTicks >= KE_FREEZE_TICKS) {
+            sim.frozen = true;
+            // Zero out residual velocity so a future un-freeze starts clean.
+            for (const n of nodes) {
+              n.vx = 0;
+              n.vy = 0;
+            }
+          }
+        } else {
+          sim.stableTicks = 0;
+        }
       }
 
       // ==== Render ====
@@ -521,10 +573,21 @@ export default function ForceGraphPanel({
     return best ? best.ed : null;
   };
 
+  // Any user interaction wakes the simulation back up so dragging /
+  // clicking after a freeze still updates positions and the highlight
+  // halo redraws cleanly.
+  const wakeSim = () => {
+    const sim = simRef.current;
+    if (!sim) return;
+    sim.frozen = false;
+    sim.stableTicks = 0;
+  };
+
   const onDown = (ev: React.PointerEvent<HTMLDivElement>) => {
     const n = locateNode(ev.clientX, ev.clientY);
     if (n) {
       simRef.current!.drag = { id: n.id, n };
+      wakeSim();
       onSelect(n.id);
       onSelectEdge?.(null);
       (ev.target as HTMLElement).setPointerCapture?.(ev.pointerId);
@@ -533,10 +596,12 @@ export default function ForceGraphPanel({
     // No node hit — try edges.
     const hitEdge = locateEdge(ev.clientX, ev.clientY);
     if (hitEdge && hitEdge.uuid) {
+      wakeSim();
       onSelectEdge?.(hitEdge.uuid);
       onSelect(null);
       return;
     }
+    wakeSim();
     onSelect(null);
     onSelectEdge?.(null);
   };
