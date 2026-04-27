@@ -21,6 +21,7 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff",
     "httpx",
+    "networkx>=3.2",
 ]
 api = [
     "fastapi>=0.110",
