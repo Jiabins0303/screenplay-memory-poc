@@ -82,3 +82,7 @@ logs/
 
 # --- Brainstorming visual companion (mockups + server state) ---
 .superpowers/
+
+# Playwright artifacts (browser tests)
+.playwright-mcp/
+*.png
