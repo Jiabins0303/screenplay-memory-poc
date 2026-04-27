@@ -1,32 +1,22 @@
 // 对话查询 · structured boundary answers from the knowledge graph.
 // Shows quick-ask chips, user bubbles on the right, assistant bubbles on
-// the left. If the question matches a MOCK seed (demo project), we render
-// a rich "boundary result" card with character/fact/beat/trace chips;
-// otherwise we hit POST /query on the real backend.
+// the left. Live mode posts to /query; demo mode returns a generic
+// placeholder message — the heavy "boundary result" card was retired
+// when we dropped the legacy "回响" mock seeds (see PR feat/static-pages).
 
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { DEMO_ONLY } from "../env";
 import { useUI } from "../store";
-import { MOCK_CHAT_SEED, findBeat, findCharacter, findFact, findScene } from "../mockdata";
 
 type Msg =
   | { role: "user"; text: string }
   | { role: "assistant"; kind: "welcome" }
-  | { role: "assistant"; kind: "generic"; text: string }
-  | {
-      role: "assistant";
-      kind: "boundary";
-      fact: string;
-      character: string;
-      atBeat: string;
-      summary: string;
-      trace: string[];
-    };
+  | { role: "assistant"; kind: "generic"; text: string };
 
 const QUICK_ASKS_DEMO = [
-  "张伟何时知道领养的事？",
-  "周雅静知道张伟知情吗？",
+  "剧中有哪些主要角色？",
+  "厉北辰和苏念是什么关系？",
 ];
 
 const QUICK_ASKS_REAL = [
@@ -59,22 +49,14 @@ export default function ChatPopover() {
     try {
       if (isDemo) {
         await new Promise((r) => setTimeout(r, 600 + Math.random() * 300));
-        const seed = MOCK_CHAT_SEED.find((s) => trimmed.includes(s.q.slice(0, 4)));
-        if (seed) {
-          setMsgs((m) => [
-            ...m,
-            { role: "assistant", kind: "boundary", ...seed.a },
-          ]);
-        } else {
-          setMsgs((m) => [
-            ...m,
-            {
-              role: "assistant",
-              kind: "generic",
-              text: `（示例回答）根据当前节拍层推理，「${trimmed.slice(0, 16)}」可以追溯到多个场次。示例模式下仅对预设问题给出结构化答案。`,
-            },
-          ]);
-        }
+        setMsgs((m) => [
+          ...m,
+          {
+            role: "assistant",
+            kind: "generic",
+            text: `（示例回答）静态演示版本未连接 LLM，无法对「${trimmed.slice(0, 16)}」作真实查询。请部署本地后端版本以体验完整功能。`,
+          },
+        ]);
       } else {
         const res = await api.post<{
           mode: string;
@@ -270,61 +252,6 @@ function ChatMsg({ m }: { m: Msg }) {
           }}
         >
           {m.text}
-        </div>
-      </div>
-    );
-  }
-  if (m.kind === "boundary") {
-    const fact = findFact(m.fact);
-    const char = findCharacter(m.character);
-    const beat = findBeat(m.atBeat);
-    return (
-      <div
-        style={{
-          marginBottom: 12,
-          padding: "12px 14px",
-          background: "var(--ink-050)",
-          borderRadius: 0,
-          border: "1px solid var(--divider)",
-          borderLeft: "3px solid #e4002b",
-        }}
-      >
-        <div className="tiny muted" style={{ marginBottom: 6 }}>
-          知识边界查询
-        </div>
-        <div
-          style={{
-            fontSize: 13.5,
-            lineHeight: 1.8,
-            color: "var(--ink-800)",
-            marginBottom: 10,
-          }}
-        >
-          {m.summary}
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-          {char && <span className="chip">{char.name}</span>}
-          {fact && <span className="chip hot">{fact.text}</span>}
-          {beat && <span className="chip">于 {beat.label}</span>}
-        </div>
-        <div className="tiny muted">
-          证据场次
-        </div>
-        <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
-          {m.trace.map((sid) => {
-            const s = findScene(sid);
-            return (
-              s && (
-                <span
-                  key={sid}
-                  className="chip mono"
-                  style={{ fontSize: 11 }}
-                >
-                  E{s.ep}·S{s.sc} {s.title}
-                </span>
-              )
-            );
-          })}
         </div>
       </div>
     );
