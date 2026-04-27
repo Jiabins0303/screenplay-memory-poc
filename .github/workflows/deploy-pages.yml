@@ -57,6 +57,11 @@ jobs:
         run: pnpm build
 
       - uses: actions/configure-pages@v5
+        with:
+          # Auto-enable Pages on first run so the user doesn't have to
+          # toggle Settings → Pages → Source manually. Requires the
+          # workflow's pages: write permission (granted above).
+          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
