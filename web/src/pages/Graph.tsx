@@ -90,7 +90,11 @@ export default function GraphPage() {
   }, [selectedEdgeUuid, graph]);
 
   if (!project) {
-    return <div style={{ padding: 40, color: "var(--ink-500)" }}>先选择或新建项目。</div>;
+    return (
+      <div className="graph-dark" style={{ padding: 40, color: "var(--text-muted)", background: "var(--bg)", minHeight: "100%" }}>
+        先选择或新建项目。
+      </div>
+    );
   }
 
   function toggle(label: string) {
@@ -127,6 +131,7 @@ export default function GraphPage() {
 
   return (
     <div
+      className="graph-dark"
       style={{
         display: "grid",
         // ``minmax(0, 1fr)`` instead of bare ``1fr`` is the load-bearing
@@ -138,9 +143,11 @@ export default function GraphPage() {
         // no-op even though state was updating. ``minmax(0, …)`` lets
         // the track shrink so the inspector column fits.
         gridTemplateColumns:
-          "188px minmax(0, 1fr)" + (showInspector ? " 320px" : ""),
+          "208px minmax(0, 1fr)" + (showInspector ? " 340px" : ""),
         height: "100%",
         minHeight: 0,
+        background: "var(--bg)",
+        color: "var(--text)",
       }}
     >
       <FilterRail
@@ -152,18 +159,30 @@ export default function GraphPage() {
       />
       <div
         style={{
+          position: "relative",
           display: "flex",
           flexDirection: "column",
           minHeight: 0,
           minWidth: 0,
+          background: "var(--bg)",
         }}
       >
+        {/* Glass-pill layer switcher floats above the canvas (top-center). */}
         <div
           style={{
-            display: "flex",
-            borderBottom: "1px solid var(--divider)",
-            background: "#fff",
-            flexShrink: 0,
+            position: "absolute",
+            top: 14,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 3,
+            display: "inline-flex",
+            padding: 4,
+            gap: 2,
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: 999,
+            backdropFilter: "blur(10px)",
+            WebkitBackdropFilter: "blur(10px)",
           }}
         >
           {(["detail", "hl", "bridge"] as Layer[]).map((L) => {
@@ -173,21 +192,28 @@ export default function GraphPage() {
                 key={L}
                 onClick={() => setLayer(L)}
                 style={{
-                  padding: "10px 18px",
-                  background: active ? "var(--ink-000)" : "transparent",
-                  color: active ? "var(--char-500)" : "var(--ink-600)",
-                  fontWeight: active ? 700 : 500,
-                  fontSize: 13,
+                  padding: "6px 14px",
+                  background: active ? "rgba(255,255,255,0.14)" : "transparent",
+                  color: active ? "var(--text)" : "var(--text-muted)",
+                  fontWeight: active ? 600 : 500,
+                  fontSize: 12,
                   cursor: "pointer",
                   border: "none",
-                  borderBottom: active
-                    ? "2px solid var(--char-500)"
-                    : "2px solid transparent",
+                  borderRadius: 999,
+                  transition: "background .15s, color .15s",
+                  letterSpacing: 0.3,
                 }}
               >
                 {LAYER_TITLE[L]}
-                <span className="tiny muted" style={{ marginLeft: 6 }}>
-                  · {active ? graph.nodes.length : 0} 节点 · {active ? graph.edges.length : 0} 边
+                <span
+                  style={{
+                    marginLeft: 6,
+                    fontSize: 10,
+                    color: active ? "var(--text-dim)" : "var(--text-muted)",
+                    fontFamily: "var(--font-mono, monospace)",
+                  }}
+                >
+                  {active ? graph.nodes.length : 0}·{active ? graph.edges.length : 0}
                 </span>
               </button>
             );
@@ -230,14 +256,16 @@ export default function GraphPage() {
         <div
           style={{
             position: "absolute",
-            bottom: 70,
-            left: 208,
-            color: "var(--err)",
+            bottom: 24,
+            left: 232,
+            color: "#fca5a5",
             fontSize: 12,
-            background: "var(--ink-100)",
-            padding: "6px 10px",
-            borderRadius: 0,
-            border: "1px solid var(--divider-strong)",
+            background: "var(--surface-strong)",
+            backdropFilter: "blur(10px)",
+            WebkitBackdropFilter: "blur(10px)",
+            padding: "8px 12px",
+            borderRadius: 8,
+            border: "1px solid rgba(252,165,165,0.35)",
           }}
         >
           {error}

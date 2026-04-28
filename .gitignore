@@ -17,6 +17,10 @@ eggs/
 .eggs/
 lib/
 lib64/
+# Allow the web/ frontend's lib/ utilities — the lib/ rule above is for
+# Python build artifacts and was swallowing src/lib/ in the React app.
+!web/src/lib/
+!web/src/lib/**
 parts/
 sdist/
 var/

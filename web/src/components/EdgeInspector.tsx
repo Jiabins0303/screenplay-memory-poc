@@ -1,7 +1,7 @@
 // Right-rail inspector for a selected edge. Mirrors NodeInspector's shape
-// (320px panel, demo-mode banner, FieldsTable, scene-appearance chips) but
-// renders edge-specific bits: source→target chips, edge type as the title,
-// quote snippets parsed from the JSON-encoded `quotes` property.
+// (panel, demo banner, FieldsTable, scene-appearance chips) but renders
+// edge-specific bits: source→target chips, edge type as the title, quote
+// snippets parsed from the JSON-encoded `quotes` property.
 
 import { useMemo, useState } from "react";
 import { api } from "../api";
@@ -14,13 +14,9 @@ interface Props {
   graph: GraphDTO;
   onRefresh: () => void;
   onClose: () => void;
-  // Optional — when provided, source/target chips become clickable so users
-  // can pivot from the edge into either endpoint's NodeInspector.
   onSelectNode?: (uuid: string) => void;
 }
 
-// Edge properties that get their own dedicated section (or are noise) and
-// therefore should not appear in the generic FieldsTable.
 const HIDDEN_EDGE_FIELDS = new Set(["scene_appearances", "quotes", "episodes"]);
 
 function isHiddenEdgeField(key: string): boolean {
@@ -46,9 +42,6 @@ function formatScalar(v: unknown): string {
   return String(v);
 }
 
-// Compact scene tag (S01E03). Pulls episode/scene off whatever properties
-// the backend writes — both `episode_number` and the bare `episode` form
-// show up depending on layer.
 function sceneTag(n: NodeDTO): string {
   const ep = (n.properties.episode_number ?? n.properties.episode) as
     | number
@@ -67,8 +60,6 @@ interface QuoteEntry {
   snippet: string;
 }
 
-// `quotes` is stored as a JSON-encoded string (Neo4j primitive constraint),
-// so we have to parse it. Robust against missing/malformed payloads.
 function parseQuotes(raw: unknown): QuoteEntry[] {
   if (!raw) return [];
   if (typeof raw !== "string") return [];
@@ -107,13 +98,10 @@ export default function EdgeInspector({
 
   const props = edge.properties || {};
 
-  // Generic property rows for the FieldsTable.
   const fieldRows = useMemo<Array<[string, unknown]>>(() => {
     return Object.entries(props).filter(([k]) => !isHiddenEdgeField(k));
   }, [props]);
 
-  // Scene appearances chips. Resolves UUIDs to scene nodes when possible so
-  // we can render a real S01E03-style tag; otherwise falls back to short uuid.
   const sceneUUIDs = (props.scene_appearances as string[] | undefined) ?? [];
   const sceneTagFor = (uuid: string): string => {
     const n = graph.nodes.find((x) => x.uuid === uuid);
@@ -121,7 +109,6 @@ export default function EdgeInspector({
     return sceneTag(n);
   };
 
-  // Quote snippets (JSON-encoded list).
   const quotes = useMemo(() => parseQuotes(props.quotes), [props.quotes]);
   const visibleQuotes = showAllQuotes ? quotes : quotes.slice(0, 3);
   const hiddenQuoteCount = Math.max(0, quotes.length - 3);
@@ -142,13 +129,11 @@ export default function EdgeInspector({
     }
   }
 
-  // Tiny endpoint chip — clickable when onSelectNode is provided.
   const Endpoint = ({ node, fallback }: { node: NodeDTO | undefined; fallback: string }) => (
     <span
       className="chip"
       style={{
         cursor: node && onSelectNode ? "pointer" : "default",
-        fontSize: 12,
       }}
       onClick={() => node && onSelectNode?.(node.uuid)}
       title={node?.labels.join(" · ") ?? fallback}
@@ -160,14 +145,17 @@ export default function EdgeInspector({
   return (
     <aside
       style={{
-        width: 320,
-        padding: "18px 20px",
-        background: "#fff",
-        borderLeft: "1px solid var(--divider-strong)",
+        width: 340,
+        padding: "20px 22px",
+        background: "var(--surface)",
+        borderLeft: "1px solid var(--border)",
+        backdropFilter: "blur(12px)",
+        WebkitBackdropFilter: "blur(12px)",
         overflow: "auto",
         display: "flex",
         flexDirection: "column",
-        gap: 14,
+        gap: 16,
+        color: "var(--text)",
       }}
     >
       <div className="row">
@@ -188,16 +176,16 @@ export default function EdgeInspector({
           }}
         >
           <Endpoint node={src} fallback={edge.source.slice(0, 8)} />
-          <span style={{ color: "var(--ink-500)" }}>━━▶</span>
+          <span style={{ color: "var(--text-muted)" }}>━━▶</span>
           <Endpoint node={dst} fallback={edge.target.slice(0, 8)} />
         </div>
         <div
           style={{
             fontSize: 20,
-            color: "var(--ink-900)",
+            color: "var(--text)",
             fontWeight: 700,
             wordBreak: "break-all",
-            marginTop: 8,
+            marginTop: 10,
           }}
         >
           {edge.type}
@@ -206,12 +194,13 @@ export default function EdgeInspector({
 
       {demo && (
         <div
-          className="tiny muted"
           style={{
             padding: "8px 10px",
-            background: "var(--ink-050)",
-            borderLeft: "2px solid var(--warn)",
-            borderRadius: 0,
+            background: "rgba(253, 203, 110, 0.10)",
+            borderLeft: "2px solid #fdcb6e",
+            borderRadius: 4,
+            fontSize: 12,
+            color: "var(--text-dim)",
           }}
         >
           示例项目为只读模式，边编辑不可用。
@@ -228,7 +217,7 @@ export default function EdgeInspector({
 
       {fieldRows.length > 0 && (
         <div>
-          <div className="tiny muted" style={{ letterSpacing: 0, marginBottom: 4 }}>
+          <div className="tiny muted" style={{ marginBottom: 6 }}>
             边属性
           </div>
           <FieldsTable fields={fieldRows} />
@@ -237,7 +226,7 @@ export default function EdgeInspector({
 
       {sceneUUIDs.length > 0 && (
         <div>
-          <div className="tiny muted" style={{ letterSpacing: 0, marginBottom: 6 }}>
+          <div className="tiny muted" style={{ marginBottom: 8 }}>
             出现于 ({sceneUUIDs.length} 场)
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
@@ -245,10 +234,7 @@ export default function EdgeInspector({
               <span
                 key={uuid}
                 className="chip"
-                style={{
-                  fontSize: 11,
-                  cursor: onSelectNode ? "pointer" : "default",
-                }}
+                style={{ cursor: onSelectNode ? "pointer" : "default" }}
                 onClick={() => onSelectNode?.(uuid)}
                 title={uuid}
               >
@@ -261,7 +247,7 @@ export default function EdgeInspector({
 
       {quotes.length > 0 && (
         <div>
-          <div className="tiny muted" style={{ letterSpacing: 0, marginBottom: 6 }}>
+          <div className="tiny muted" style={{ marginBottom: 8 }}>
             原文片段 ({quotes.length})
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -269,17 +255,18 @@ export default function EdgeInspector({
               <div
                 key={i}
                 style={{
-                  padding: "6px 8px",
-                  background: "var(--ink-050)",
-                  borderLeft: "2px solid var(--divider-strong)",
+                  padding: "8px 10px",
+                  background: "rgba(255,255,255,0.04)",
+                  borderLeft: "2px solid var(--border-strong)",
+                  borderRadius: 4,
                   fontSize: 12,
-                  lineHeight: 1.5,
-                  color: "var(--ink-800)",
+                  lineHeight: 1.6,
+                  color: "var(--text-dim)",
                 }}
               >
                 <span
                   className="mono tiny"
-                  style={{ color: "var(--ink-500)", marginRight: 6 }}
+                  style={{ color: "var(--text-muted)", marginRight: 6 }}
                 >
                   [{q.scene_uuid ? sceneTagFor(q.scene_uuid) : "—"}]
                 </span>
@@ -311,7 +298,7 @@ export default function EdgeInspector({
       )}
 
       {error && (
-        <div className="tiny" style={{ color: "var(--err)", whiteSpace: "pre-wrap" }}>
+        <div style={{ fontSize: 12, color: "#fca5a5", whiteSpace: "pre-wrap" }}>
           {error}
         </div>
       )}
@@ -328,28 +315,26 @@ function InspectorRow({
 }) {
   return (
     <div>
-      <div className="tiny muted" style={{ letterSpacing: 0, marginBottom: 4 }}>
+      <div className="tiny muted" style={{ marginBottom: 4 }}>
         {k}
       </div>
-      <div style={{ color: "var(--ink-800)", fontSize: 13 }}>{children}</div>
+      <div style={{ color: "var(--text-dim)", fontSize: 13 }}>{children}</div>
     </div>
   );
 }
 
-// Same shape as NodeInspector's FieldsTable — kept local to avoid coupling
-// the two inspectors via a shared module that doesn't yet exist.
 function FieldsTable({ fields }: { fields: Array<[string, unknown]> }) {
   return (
     <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
       <tbody>
         {fields.map(([k, v]) => (
-          <tr key={k} style={{ borderBottom: "1px solid var(--hairline)" }}>
+          <tr key={k} style={{ borderBottom: "1px solid var(--border)" }}>
             <td
               style={{
-                color: "var(--ink-500)",
+                color: "var(--text-muted)",
                 paddingRight: 8,
-                paddingTop: 4,
-                paddingBottom: 4,
+                paddingTop: 5,
+                paddingBottom: 5,
                 whiteSpace: "nowrap",
                 verticalAlign: "top",
                 width: "40%",
@@ -359,9 +344,9 @@ function FieldsTable({ fields }: { fields: Array<[string, unknown]> }) {
             </td>
             <td
               style={{
-                color: "var(--ink-800)",
-                paddingTop: 4,
-                paddingBottom: 4,
+                color: "var(--text-dim)",
+                paddingTop: 5,
+                paddingBottom: 5,
                 wordBreak: "break-word",
               }}
             >

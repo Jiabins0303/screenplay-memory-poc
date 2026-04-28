@@ -307,6 +307,121 @@ kbd {
   border: 1px solid var(--divider);
 }
 
+/* Dark scope for the graph page only — wrap the page root in
+ * `.graph-dark` to opt every CSS-variable-driven descendant into the
+ * UniMem-style palette without touching the rest of the app. The five
+ * --cat-* tokens mirror lib/graphTheme.ts so non-canvas chrome (filter
+ * rail dots, neighbor chips) can match the canvas colors. */
+.graph-dark {
+  --bg: #0a0a0a;
+  --surface: rgba(255, 255, 255, 0.06);
+  --surface-strong: rgba(255, 255, 255, 0.10);
+  --border: rgba(255, 255, 255, 0.10);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --text: #f4f4f5;
+  --text-dim: rgba(244, 244, 245, 0.70);
+  --text-muted: rgba(244, 244, 245, 0.45);
+
+  --cat-people: #74b9ff;
+  --cat-story: #fdcb6e;
+  --cat-place: #55efc4;
+  --cat-knowledge: #a29bfe;
+  --cat-misc: #dfe6e9;
+}
+
+/* Class-level overrides so existing .btn / .input / .chip / .kicker /
+ * .muted / .tiny markup inside the graph page picks up dark colors
+ * without per-component rewrites. */
+.graph-dark .kicker {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+}
+.graph-dark .muted { color: var(--text-muted); }
+.graph-dark .dim { color: var(--text-muted); }
+.graph-dark .tiny { color: var(--text-dim); }
+.graph-dark .mono { color: var(--text-dim); }
+
+.graph-dark .chip {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  padding: 2px 9px;
+}
+.graph-dark .chip.hot {
+  background: rgba(116, 185, 255, 0.18);
+  color: #cfe7ff;
+  border-color: rgba(116, 185, 255, 0.45);
+}
+
+.graph-dark .input,
+.graph-dark .textarea,
+.graph-dark .select {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+}
+.graph-dark .input:focus,
+.graph-dark .textarea:focus,
+.graph-dark .select:focus {
+  border-color: rgba(116, 185, 255, 0.65);
+  box-shadow: 0 0 0 3px rgba(116, 185, 255, 0.15);
+}
+.graph-dark .input::placeholder { color: var(--text-muted); }
+
+.graph-dark .btn {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+}
+.graph-dark .btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.30);
+}
+.graph-dark .btn.primary {
+  background: rgba(116, 185, 255, 0.20);
+  color: #ffffff;
+  border-color: rgba(116, 185, 255, 0.55);
+}
+.graph-dark .btn.primary:hover {
+  background: rgba(116, 185, 255, 0.32);
+  border-color: rgba(116, 185, 255, 0.75);
+}
+.graph-dark .btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-dim);
+}
+.graph-dark .btn.ghost:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: transparent;
+  color: var(--text);
+}
+.graph-dark .btn.danger {
+  background: transparent;
+  color: #fca5a5;
+  border-color: rgba(252, 165, 165, 0.45);
+}
+.graph-dark .btn.danger:hover {
+  background: rgba(252, 165, 165, 0.18);
+  color: #ffffff;
+  border-color: rgba(252, 165, 165, 0.75);
+}
+
+.graph-dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.graph-dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.30);
+  background-clip: padding-box;
+}
+
 @keyframes fade-rise {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { api } from "../api";
 import type { GraphDTO, NodeDTO } from "../types";
 import { KIND_ZH, ROLE_ZH } from "../mockdata";
+import { CATEGORY_COLOR, categoryFor } from "../lib/graphTheme";
 
 interface Props {
   projectId: string;
@@ -15,42 +16,9 @@ interface Props {
   onSelectNeighbor?: (uuid: string) => void;
 }
 
-// Same KIND→CSS-var palette ForceGraphPanel uses, kept local so this component
-// stays self-contained (no shared module yet, and importing the panel just for
-// a constant table would be overkill).
-const KIND_COLOR_VARS: Record<string, string> = {
-  Character: "--char-500",
-  Identity: "--ident-500",
-  Family: "--family-500",
-  Organization: "--org-500",
-  Location: "--loc-500",
-  Item: "--item-500",
-  Misunderstanding: "--mis-500",
-  Secret: "--secret-500",
-  Scene: "--scene-500",
-  PlotEvent: "--event-500",
-  Beat: "--beat-500",
-  Arc: "--arc-500",
-  Theme: "--theme-500",
-  Trope: "--trope-500",
-};
-
-const GENERIC_LABELS = new Set(["Entity", "Episodic"]);
-
-// Picks the CSS var for a node's primary kind label. Falls back to the muted
-// ink token when the labels are all generic (Entity / Episodic) or unknown.
-function nodeColorVar(node: NodeDTO): string {
-  for (const label of node.labels) {
-    if (GENERIC_LABELS.has(label)) continue;
-    const v = KIND_COLOR_VARS[label];
-    if (v) return v;
-  }
-  return "--ink-300";
-}
-
 // Fields hidden from the generic FieldsTable. Embeddings are noisy, and
 // scene_appearances / quotes get their own dedicated sections.
-const HIDDEN_FIELD_PREFIXES = ["_"]; // intentionally empty-ish; keep for future
+const HIDDEN_FIELD_PREFIXES = ["_"];
 const HIDDEN_FIELDS = new Set(["scene_appearances", "quotes"]);
 
 function isHiddenField(key: string): boolean {
@@ -79,7 +47,6 @@ function formatScalar(v: unknown): string {
   return String(v);
 }
 
-// Renders a Scene node's compact tag like S01E03.
 function sceneTag(n: NodeDTO): string {
   const ep = (n.properties.episode ?? n.properties.episode_number) as number | undefined;
   const sc = (n.properties.scene ?? n.properties.scene_number) as number | undefined;
@@ -111,7 +78,7 @@ export default function NodeInspector({
   const tension = props.tension_level as number | undefined;
   const statusTags = (props.status_tags as unknown[] | undefined) ?? [];
   const severity = props.severity as number | undefined;
-  const isReal = props.is_real as boolean | undefined; // for Identity nodes
+  const isReal = props.is_real as boolean | undefined;
 
   async function rename() {
     if (demo) return;
@@ -167,8 +134,8 @@ export default function NodeInspector({
   const otherNodes = graph.nodes.filter((n) => n.uuid !== node.uuid);
   const kind = node.labels.find((l) => KIND_ZH[l]) ?? node.labels[0] ?? "";
 
-  // 1-hop neighbors (deduped). We don't care about edge direction here —
-  // the inspector just needs "who is connected to me".
+  // 1-hop neighbors (deduped). Edge direction doesn't matter — the
+  // inspector just wants "who is connected to me".
   const neighbors = useMemo(() => {
     const ns: NodeDTO[] = [];
     const seen = new Set<string>();
@@ -185,22 +152,17 @@ export default function NodeInspector({
     return ns;
   }, [graph, node.uuid]);
 
-  // Identity neighbors (Character-only). Surfaced separately because they're
-  // the most useful at-a-glance signal for protagonists in this drama type.
   const identityNeighbors = useMemo(() => {
     if (!node.labels.includes("Character")) return [];
     return neighbors.filter((n) => n.labels.includes("Identity"));
   }, [neighbors, node.labels]);
 
-  // Generic neighbors = everyone else, so the same node isn't shown twice.
   const genericNeighbors = useMemo(() => {
     if (identityNeighbors.length === 0) return neighbors;
     const idSet = new Set(identityNeighbors.map((n) => n.uuid));
     return neighbors.filter((n) => !idSet.has(n.uuid));
   }, [neighbors, identityNeighbors]);
 
-  // Scene appearances list — read off the property the backend writes during
-  // post-ingest indexing (queries/scene_index.py).
   const sceneUUIDs = (props.scene_appearances as string[] | undefined) ?? [];
   const sceneNodes = useMemo(() => {
     const out: NodeDTO[] = [];
@@ -213,8 +175,6 @@ export default function NodeInspector({
   const visibleScenes = showAllScenes ? sceneNodes : sceneNodes.slice(0, 8);
   const hiddenSceneCount = Math.max(0, sceneNodes.length - 8);
 
-  // Generic property rows — strings, numbers, booleans, arrays we don't have
-  // a dedicated panel for.
   const fieldRows = useMemo<Array<[string, unknown]>>(() => {
     return Object.entries(props).filter(([k]) => !isHiddenField(k));
   }, [props]);
@@ -222,14 +182,17 @@ export default function NodeInspector({
   return (
     <aside
       style={{
-        width: 320,
-        padding: "18px 20px",
-        background: "#fff",
-        borderLeft: "1px solid var(--divider-strong)",
+        width: 340,
+        padding: "20px 22px",
+        background: "var(--surface)",
+        borderLeft: "1px solid var(--border)",
+        backdropFilter: "blur(12px)",
+        WebkitBackdropFilter: "blur(12px)",
         overflow: "auto",
         display: "flex",
         flexDirection: "column",
-        gap: 14,
+        gap: 16,
+        color: "var(--text)",
       }}
     >
       <div className="row">
@@ -244,15 +207,15 @@ export default function NodeInspector({
         <div
           style={{
             fontSize: 20,
-            color: "var(--ink-900)",
+            color: "var(--text)",
             fontWeight: 700,
             wordBreak: "break-all",
           }}
         >
           {name || node.uuid}
         </div>
-        <div className="row" style={{ marginTop: 6, gap: 6, flexWrap: "wrap" }}>
-          {kind && <KindChip kind={kind} />}
+        <div className="row" style={{ marginTop: 8, gap: 6, flexWrap: "wrap" }}>
+          {kind && <KindChip node={node} kind={kind} />}
           {roleCode && <span className="chip hot">{ROLE_ZH[roleCode] || roleCode}</span>}
           {typeof age === "number" && age > 0 && <span className="chip">{age} 岁</span>}
           {typeof tension === "number" && (
@@ -274,12 +237,13 @@ export default function NodeInspector({
 
       {demo && (
         <div
-          className="tiny muted"
           style={{
             padding: "8px 10px",
-            background: "var(--ink-050)",
-            borderLeft: "2px solid var(--warn)",
-            borderRadius: 0,
+            background: "rgba(253, 203, 110, 0.10)",
+            borderLeft: "2px solid #fdcb6e",
+            borderRadius: 4,
+            fontSize: 12,
+            color: "var(--text-dim)",
           }}
         >
           示例项目为只读模式，节点编辑不可用。
@@ -295,7 +259,7 @@ export default function NodeInspector({
 
       {!demo && (
         <div>
-          <div className="tiny muted" style={{ letterSpacing: 0, marginBottom: 4 }}>
+          <div className="tiny muted" style={{ marginBottom: 6 }}>
             重命名
           </div>
           <div style={{ display: "flex", gap: 6 }}>
@@ -311,7 +275,6 @@ export default function NodeInspector({
         </div>
       )}
 
-      {/* Type-specific extras: surface the highest-value field for the kind. */}
       {node.labels.includes("Misunderstanding") && typeof severity === "number" && (
         <InspectorRow k="严重程度">
           <Stars value={severity} max={5} />
@@ -323,10 +286,9 @@ export default function NodeInspector({
         </InspectorRow>
       )}
 
-      {/* Character → Identity panel (surfaced before generic neighbors). */}
       {identityNeighbors.length > 0 && (
         <div>
-          <div className="tiny muted" style={{ letterSpacing: 0, marginBottom: 6 }}>
+          <div className="tiny muted" style={{ marginBottom: 8 }}>
             身份 ({identityNeighbors.length})
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -348,20 +310,18 @@ export default function NodeInspector({
         </div>
       )}
 
-      {/* Basic attributes table (replaces the old <pre>JSON</pre>). */}
       {fieldRows.length > 0 && (
         <div>
-          <div className="tiny muted" style={{ letterSpacing: 0, marginBottom: 4 }}>
+          <div className="tiny muted" style={{ marginBottom: 6 }}>
             基础属性
           </div>
           <FieldsTable fields={fieldRows} />
         </div>
       )}
 
-      {/* 1-hop neighbors (excluding Identity nodes already shown above). */}
       {genericNeighbors.length > 0 && (
         <div>
-          <div className="tiny muted" style={{ letterSpacing: 0, marginBottom: 6 }}>
+          <div className="tiny muted" style={{ marginBottom: 8 }}>
             1-hop 邻居 ({genericNeighbors.length})
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -372,10 +332,9 @@ export default function NodeInspector({
         </div>
       )}
 
-      {/* Scene appearances — collapsible past 8. */}
       {sceneNodes.length > 0 && (
         <div>
-          <div className="tiny muted" style={{ letterSpacing: 0, marginBottom: 6 }}>
+          <div className="tiny muted" style={{ marginBottom: 8 }}>
             出现于 ({sceneNodes.length} 场)
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
@@ -383,7 +342,7 @@ export default function NodeInspector({
               <span
                 key={s.uuid}
                 className="chip"
-                style={{ fontSize: 11, cursor: onSelectNeighbor ? "pointer" : "default" }}
+                style={{ cursor: onSelectNeighbor ? "pointer" : "default" }}
                 onClick={() => onSelectNeighbor?.(s.uuid)}
                 title={s.name ?? s.uuid}
               >
@@ -404,8 +363,8 @@ export default function NodeInspector({
       )}
 
       {!demo && (
-        <div style={{ paddingTop: 8, borderTop: "1px solid var(--hairline)" }}>
-          <div className="tiny muted" style={{ letterSpacing: 0, marginBottom: 6 }}>
+        <div style={{ paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+          <div className="tiny muted" style={{ marginBottom: 8 }}>
             新增边 (从本节点出发)
           </div>
           <input
@@ -450,7 +409,7 @@ export default function NodeInspector({
       )}
 
       {error && (
-        <div className="tiny" style={{ color: "var(--err)", whiteSpace: "pre-wrap" }}>
+        <div style={{ fontSize: 12, color: "#fca5a5", whiteSpace: "pre-wrap" }}>
           {error}
         </div>
       )}
@@ -461,28 +420,26 @@ export default function NodeInspector({
 function InspectorRow({ k, children }: { k: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="tiny muted" style={{ letterSpacing: 0, marginBottom: 4 }}>
+      <div className="tiny muted" style={{ marginBottom: 4 }}>
         {k}
       </div>
-      <div style={{ color: "var(--ink-800)", fontSize: 13 }}>{children}</div>
+      <div style={{ color: "var(--text-dim)", fontSize: 13 }}>{children}</div>
     </div>
   );
 }
 
-// Two-column key/value table. Hidden fields are filtered upstream so this
-// is a pure view component.
 function FieldsTable({ fields }: { fields: Array<[string, unknown]> }) {
   return (
     <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
       <tbody>
         {fields.map(([k, v]) => (
-          <tr key={k} style={{ borderBottom: "1px solid var(--hairline)" }}>
+          <tr key={k} style={{ borderBottom: "1px solid var(--border)" }}>
             <td
               style={{
-                color: "var(--ink-500)",
+                color: "var(--text-muted)",
                 paddingRight: 8,
-                paddingTop: 4,
-                paddingBottom: 4,
+                paddingTop: 5,
+                paddingBottom: 5,
                 whiteSpace: "nowrap",
                 verticalAlign: "top",
                 width: "40%",
@@ -492,9 +449,9 @@ function FieldsTable({ fields }: { fields: Array<[string, unknown]> }) {
             </td>
             <td
               style={{
-                color: "var(--ink-800)",
-                paddingTop: 4,
-                paddingBottom: 4,
+                color: "var(--text-dim)",
+                paddingTop: 5,
+                paddingBottom: 5,
                 wordBreak: "break-word",
               }}
             >
@@ -507,17 +464,13 @@ function FieldsTable({ fields }: { fields: Array<[string, unknown]> }) {
   );
 }
 
-// Kind chip carries the kind's color as a tinted background. We use the
-// CSS var directly via color-mix so we don't have to define new classes.
-function KindChip({ kind }: { kind: string }) {
-  const varName = KIND_COLOR_VARS[kind];
-  const style: React.CSSProperties = varName
-    ? {
-        background: `color-mix(in srgb, var(${varName}) 18%, transparent)`,
-        borderColor: `color-mix(in srgb, var(${varName}) 50%, transparent)`,
-        color: "var(--ink-800)",
-      }
-    : {};
+function KindChip({ node, kind }: { node: NodeDTO; kind: string }) {
+  const color = CATEGORY_COLOR[categoryFor(node)];
+  const style: React.CSSProperties = {
+    background: `color-mix(in srgb, ${color} 18%, transparent)`,
+    borderColor: `color-mix(in srgb, ${color} 50%, transparent)`,
+    color: "#ffffff",
+  };
   return (
     <span className="chip" style={style}>
       {KIND_ZH[kind] || kind}
@@ -525,8 +478,6 @@ function KindChip({ kind }: { kind: string }) {
   );
 }
 
-// Neighbor chip — clickable when onSelect is provided. Background color is
-// tinted from the neighbor's entity-kind CSS var.
 function NeighborChip({
   node,
   onSelect,
@@ -536,13 +487,12 @@ function NeighborChip({
   onSelect?: (uuid: string) => void;
   trailing?: string;
 }) {
-  const varName = nodeColorVar(node);
+  const color = CATEGORY_COLOR[categoryFor(node)];
   const style: React.CSSProperties = {
-    background: `color-mix(in srgb, var(${varName}) 18%, transparent)`,
-    borderColor: `color-mix(in srgb, var(${varName}) 50%, transparent)`,
-    color: "var(--ink-800)",
+    background: `color-mix(in srgb, ${color} 14%, transparent)`,
+    borderColor: `color-mix(in srgb, ${color} 40%, transparent)`,
+    color: "var(--text)",
     cursor: onSelect ? "pointer" : "default",
-    fontSize: 12,
   };
   return (
     <span
@@ -557,35 +507,26 @@ function NeighborChip({
   );
 }
 
-// Filled-star rating, e.g. severity 1–5. Falsy / out-of-range values still
-// render as zero filled stars so the row is consistent.
 function Stars({ value, max }: { value: number; max: number }) {
   const filled = Math.max(0, Math.min(max, Math.round(value)));
   return (
-    <span style={{ letterSpacing: 2, color: "var(--warn, #d68900)" }} aria-label={`${filled} / ${max}`}>
+    <span style={{ letterSpacing: 2, color: "#fdcb6e" }} aria-label={`${filled} / ${max}`}>
       {"★".repeat(filled)}
-      <span style={{ color: "var(--ink-300)" }}>{"☆".repeat(max - filled)}</span>
+      <span style={{ color: "rgba(255,255,255,0.20)" }}>{"☆".repeat(max - filled)}</span>
     </span>
   );
 }
 
-// Tiny inline progress bar for tension_level (Beat 1–10).
 function Bar({ value, max }: { value: number; max: number }) {
   const pct = Math.max(0, Math.min(100, (value / max) * 100));
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-      }}
-    >
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
       <div
         style={{
           flex: 1,
           height: 6,
-          background: "var(--ink-200)",
-          borderRadius: 0,
+          background: "rgba(255,255,255,0.10)",
+          borderRadius: 999,
           overflow: "hidden",
         }}
       >
@@ -593,11 +534,11 @@ function Bar({ value, max }: { value: number; max: number }) {
           style={{
             width: `${pct}%`,
             height: "100%",
-            background: "var(--beat-500, #b34a3a)",
+            background: "linear-gradient(90deg, #74b9ff, #a29bfe)",
           }}
         />
       </div>
-      <span className="mono tiny" style={{ color: "var(--ink-700)" }}>
+      <span className="mono tiny" style={{ color: "var(--text-dim)" }}>
         {value} / {max}
       </span>
     </div>

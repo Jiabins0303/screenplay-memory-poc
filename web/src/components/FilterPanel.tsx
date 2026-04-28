@@ -1,5 +1,6 @@
 import type { NodeDTO } from "../types";
-import { KIND_COLOR, KIND_ZH } from "../mockdata";
+import { KIND_ZH } from "../mockdata";
+import { CATEGORY_COLOR, categoryFor } from "../lib/graphTheme";
 
 interface Props {
   detailNodes: NodeDTO[];
@@ -16,35 +17,52 @@ export default function FilterRail({
   onToggle,
   onRefresh,
 }: Props) {
-  const counts = new Map<string, number>();
+  // Count nodes per kind label, plus capture an exemplar node so we can
+  // ask graphTheme.categoryFor() what color to dot. Keying on the label
+  // alone wouldn't carry enough info for category resolution.
+  const counts = new Map<string, { n: number; sample: NodeDTO }>();
   for (const n of [...detailNodes, ...hlNodes]) {
     for (const l of n.labels) {
       if (l === "Entity" || l === "Episodic") continue;
-      counts.set(l, (counts.get(l) ?? 0) + 1);
+      const cur = counts.get(l);
+      if (cur) cur.n += 1;
+      else counts.set(l, { n: 1, sample: n });
     }
   }
-  const rows = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+  const rows = Array.from(counts.entries()).sort((a, b) => b[1].n - a[1].n);
 
   return (
     <aside
       style={{
-        width: 188,
-        padding: "18px 16px",
-        background: "#fff",
-        borderRight: "1px solid var(--divider)",
+        width: 208,
+        padding: "20px 16px",
+        background: "var(--surface)",
+        borderRight: "1px solid var(--border)",
+        backdropFilter: "blur(10px)",
+        WebkitBackdropFilter: "blur(10px)",
         overflow: "auto",
         display: "flex",
         flexDirection: "column",
-        gap: 14,
+        gap: 18,
+        color: "var(--text)",
       }}
     >
       <div>
-        <div className="kicker" style={{ marginBottom: 10 }}>
-          筛选
+        <div
+          style={{
+            fontSize: 10,
+            letterSpacing: 1.2,
+            color: "var(--text-muted)",
+            textTransform: "uppercase",
+            marginBottom: 12,
+            fontWeight: 600,
+          }}
+        >
+          筛选 · Filter
         </div>
-        <div className="col" style={{ gap: 6 }}>
-          {rows.map(([label, n]) => {
-            const c = KIND_COLOR[label] || "--ink-500";
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {rows.map(([label, { n, sample }]) => {
+            const dot = CATEGORY_COLOR[categoryFor(sample)];
             const on = !hidden.has(label);
             return (
               <button
@@ -54,42 +72,65 @@ export default function FilterRail({
                   display: "flex",
                   alignItems: "center",
                   gap: 10,
-                  padding: "6px 10px",
-                  borderRadius: 0,
-                  background: on ? "var(--ink-200)" : "transparent",
-                  border: "1px solid " + (on ? "var(--divider)" : "transparent"),
-                  opacity: on ? 1 : 0.45,
+                  padding: "7px 10px",
+                  borderRadius: 8,
+                  background: on ? "rgba(255,255,255,0.06)" : "transparent",
+                  border: "1px solid " + (on ? "var(--border)" : "transparent"),
+                  opacity: on ? 1 : 0.4,
                   textAlign: "left",
+                  color: "var(--text)",
+                  cursor: "pointer",
+                  transition: "background .12s, opacity .12s",
                 }}
               >
                 <span
                   style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: 0,
-                    background: `var(${c})`,
+                    width: 9,
+                    height: 9,
+                    borderRadius: 999,
+                    background: dot,
                     flexShrink: 0,
+                    boxShadow: on ? `0 0 8px ${dot}66` : "none",
                   }}
                 />
-                <span style={{ fontSize: 13, color: "var(--ink-700)" }}>
+                <span style={{ fontSize: 13, color: "var(--text-dim)" }}>
                   {KIND_ZH[label] || label}
                 </span>
                 <div style={{ flex: 1 }} />
-                <span className="tiny mono muted">{n}</span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "var(--text-muted)",
+                    fontFamily: "var(--font-mono, monospace)",
+                  }}
+                >
+                  {n}
+                </span>
               </button>
             );
           })}
           {rows.length === 0 && (
-            <div className="tiny dim">尚无可过滤的类型</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+              尚无可过滤的类型
+            </div>
           )}
         </div>
       </div>
 
       <div>
-        <div className="kicker" style={{ marginBottom: 10 }}>
-          关系类型
+        <div
+          style={{
+            fontSize: 10,
+            letterSpacing: 1.2,
+            color: "var(--text-muted)",
+            textTransform: "uppercase",
+            marginBottom: 10,
+            fontWeight: 600,
+          }}
+        >
+          关系类型 · Edges
         </div>
-        <div className="col" style={{ gap: 4 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <Legend label="KNOWS · 认知边" />
           <Legend label="PRESENT_IN · 出场" />
           <Legend label="FOLLOWS · 时序" />
@@ -97,7 +138,29 @@ export default function FilterRail({
       </div>
 
       <div style={{ flex: 1 }} />
-      <button className="btn sm block" onClick={onRefresh}>
+      <button
+        onClick={onRefresh}
+        style={{
+          width: "100%",
+          padding: "8px 12px",
+          background: "rgba(255,255,255,0.10)",
+          color: "var(--text)",
+          border: "1px solid var(--border-strong)",
+          borderRadius: 8,
+          fontSize: 12,
+          cursor: "pointer",
+          letterSpacing: 0.4,
+          transition: "background .12s",
+        }}
+        onMouseEnter={(e) =>
+          ((e.currentTarget as HTMLButtonElement).style.background =
+            "rgba(255,255,255,0.18)")
+        }
+        onMouseLeave={(e) =>
+          ((e.currentTarget as HTMLButtonElement).style.background =
+            "rgba(255,255,255,0.10)")
+        }
+      >
         重新加载
       </button>
     </aside>
@@ -107,8 +170,14 @@ export default function FilterRail({
 function Legend({ label }: { label: string }) {
   return (
     <div
-      className="tiny muted"
-      style={{ display: "flex", alignItems: "center", gap: 8, whiteSpace: "nowrap" }}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        whiteSpace: "nowrap",
+        fontSize: 12,
+        color: "var(--text-muted)",
+      }}
     >
       <svg width="18" height="6" style={{ flexShrink: 0 }}>
         <line
@@ -116,7 +185,7 @@ function Legend({ label }: { label: string }) {
           y1="3"
           x2="18"
           y2="3"
-          stroke="var(--seal-500)"
+          stroke="rgba(180,200,255,0.55)"
           strokeWidth="1.4"
           strokeDasharray="2 2"
         />
