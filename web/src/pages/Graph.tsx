@@ -18,10 +18,19 @@ import ForceGraphPanel from "../components/ForceGraphPanel";
 import FilterRail from "../components/FilterPanel";
 import NodeInspector from "../components/NodeInspector";
 import EdgeInspector from "../components/EdgeInspector";
+import { GENERIC_LABELS } from "../lib/graphTheme";
 
-function filterGraph(graph: GraphDTO, hidden: Set<string>): GraphDTO {
-  if (hidden.size === 0) return graph;
-  const visible = graph.nodes.filter((n) => n.labels.every((l) => !hidden.has(l)));
+function filterGraph(
+  graph: GraphDTO,
+  hidden: Set<string>,
+  showInfra: boolean,
+): GraphDTO {
+  const visible = graph.nodes.filter((n) => {
+    // Drop Graphiti-bookkeeping nodes (Entity / Episodic only) when the
+    // infrastructure toggle is off.
+    if (!showInfra && n.labels.every((l) => GENERIC_LABELS.has(l))) return false;
+    return n.labels.every((l) => !hidden.has(l));
+  });
   const ids = new Set(visible.map((n) => n.uuid));
   return {
     nodes: visible,
@@ -43,8 +52,14 @@ const LAYER_LIMIT: Record<Layer, number> = {
 
 export default function GraphPage() {
   const project = useUI((s) => s.project);
+  const showInfra = useUI((s) => s.showInfra);
+  const setShowInfra = useUI((s) => s.setShowInfra);
   const [layer, setLayer] = useState<Layer>("detail");
   const [graph, setGraph] = useState<GraphDTO>({ nodes: [], edges: [] });
+  // Bridge layer kept in a separate state regardless of which tab is
+  // active, so NodeInspector can resolve "覆盖场景" for HL nodes from any
+  // tab. Fetched once per project change; cheap (Beat→Scene COVERS only).
+  const [bridgeGraph, setBridgeGraph] = useState<GraphDTO>({ nodes: [], edges: [] });
   const [selectedNodeUuid, setSelectedNodeUuid] = useState<string | null>(null);
   const [selectedEdgeUuid, setSelectedEdgeUuid] = useState<string | null>(null);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
@@ -63,6 +78,29 @@ export default function GraphPage() {
     }
   }, [project, layer]);
 
+  // Refresh bridge data whenever the project changes. Independent of the
+  // active layer tab so HL inspector can show covered scenes even from
+  // the 节拍图谱 view.
+  useEffect(() => {
+    if (!project) {
+      setBridgeGraph({ nodes: [], edges: [] });
+      return;
+    }
+    let alive = true;
+    api
+      .get<GraphDTO>(`/projects/${project.id}/graph?layer=bridge&limit=${LAYER_LIMIT.bridge}`)
+      .then((g) => {
+        if (alive) setBridgeGraph(g);
+      })
+      .catch(() => {
+        // Bridge is best-effort; an error here shouldn't block the page.
+        if (alive) setBridgeGraph({ nodes: [], edges: [] });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [project]);
+
   useEffect(() => {
     refresh();
   }, [refresh]);
@@ -75,8 +113,8 @@ export default function GraphPage() {
   }, [layer]);
 
   const filtered = useMemo(
-    () => filterGraph(graph, hidden),
-    [graph, hidden],
+    () => filterGraph(graph, hidden, showInfra),
+    [graph, hidden, showInfra],
   );
 
   const selectedNode: NodeDTO | null = useMemo(() => {
@@ -156,6 +194,8 @@ export default function GraphPage() {
         hidden={hidden}
         onToggle={toggle}
         onRefresh={refresh}
+        showInfra={showInfra}
+        onToggleInfra={() => setShowInfra(!showInfra)}
       />
       <div
         style={{
@@ -247,6 +287,7 @@ export default function GraphPage() {
           demo={DEMO_ONLY || !!project.demo}
           node={selectedNode}
           graph={filtered}
+          bridgeGraph={bridgeGraph}
           onRefresh={refresh}
           onClose={clearAllSelection}
           onSelectNeighbor={pivotToNode}

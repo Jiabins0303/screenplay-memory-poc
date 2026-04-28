@@ -16,7 +16,10 @@ import {
   MockOntologyEntity,
   MockOntologyField,
   KIND_COLOR,
+  KIND_ZH,
 } from "../mockdata";
+import { BAZONG_OBSERVED_LABELS } from "../mockdata.bazong";
+import { CATEGORY_COLOR, categoryFor } from "../lib/graphTheme";
 import type { Layer, OntologyResponse, OntologySpec } from "../types";
 
 // Ontology editing only applies to the two real KG layers; the "bridge"
@@ -209,8 +212,103 @@ export default function OntologyPage() {
             </div>
           </div>
         </Section>
+
+        {isDemo && <ObservedTypesPanel layer={layer} declaredEntityNames={entities.map((e) => e.name)} />}
       </div>
     </div>
+  );
+}
+
+// Demo-mode-only diagnostic panel: shows what entity types actually appear
+// in the snapshot and flags any that aren't declared in the curated
+// ontology. Helps catch drift between the mock schema and what the LLM
+// is actually extracting.
+function ObservedTypesPanel({
+  layer,
+  declaredEntityNames,
+}: {
+  layer: OntologyLayer;
+  declaredEntityNames: string[];
+}) {
+  const tally = BAZONG_OBSERVED_LABELS[layer] ?? {};
+  const rows = Object.entries(tally).sort((a, b) => b[1] - a[1]);
+  const declared = new Set(declaredEntityNames);
+
+  return (
+    <>
+      <div style={{ height: 24 }} />
+      <Section title="实际抽取类型" en="02C">
+        <div
+          className="panel"
+          style={{
+            padding: 14,
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+          }}
+        >
+          <div className="tiny muted" style={{ marginBottom: 4 }}>
+            示例项目快照里实际出现的实体标签，按数量排序。+ 未声明 表示当前
+            schema 里没有列出该类型，可能是 schema 漏写或抽取漂移。
+          </div>
+          {rows.length === 0 && (
+            <div className="tiny dim">该层快照中没有非通用标签。</div>
+          )}
+          {rows.map(([label, count]) => {
+            const isDeclared = declared.has(label);
+            const color = CATEGORY_COLOR[categoryFor({ labels: [label] })];
+            return (
+              <div
+                key={label}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "6px 4px",
+                  borderTop: "1px solid var(--hairline)",
+                }}
+              >
+                <span
+                  style={{
+                    width: 9,
+                    height: 9,
+                    borderRadius: 999,
+                    background: color,
+                    flexShrink: 0,
+                  }}
+                />
+                <span style={{ fontSize: 13, color: "var(--ink-800)" }}>
+                  {KIND_ZH[label] || label}
+                </span>
+                <span className="tiny muted">{label}</span>
+                <div style={{ flex: 1 }} />
+                <span
+                  className="mono tiny"
+                  style={{ color: "var(--ink-700)", marginRight: 8 }}
+                >
+                  {count}
+                </span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    padding: "1px 8px",
+                    borderRadius: 0,
+                    border: "1px solid",
+                    borderColor: isDeclared ? "var(--divider)" : "var(--err)",
+                    color: isDeclared ? "var(--ink-600)" : "var(--err)",
+                    background: isDeclared
+                      ? "transparent"
+                      : "color-mix(in srgb, var(--err) 8%, transparent)",
+                  }}
+                >
+                  {isDeclared ? "✓ 已声明" : "+ 未声明"}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </Section>
+    </>
   );
 }
 

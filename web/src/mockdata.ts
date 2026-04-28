@@ -70,6 +70,11 @@ export interface MockOntology {
   edges: MockOntologyEntity[];
 }
 
+// MOCK_ONTOLOGY_DETAIL must list the same 10 entity types declared in
+// `src/screenplay_memory/ontology/__init__.py:ENTITY_TYPES`. Keep the
+// names + count in sync; field schemas below are hand-curated for the
+// editor view and intentionally don't enumerate every backend field
+// (the Pydantic models on the server are the source of truth there).
 export const MOCK_ONTOLOGY_DETAIL: MockOntology = {
   entities: [
     {
@@ -80,11 +85,64 @@ export const MOCK_ONTOLOGY_DETAIL: MockOntology = {
         {
           name: "role_type",
           type: "literal",
-          vals: ["protagonist", "antagonist", "support", "ghost"],
+          vals: ["protagonist", "antagonist", "support", "foil", "catalyst", "ghost"],
           opt: false,
         },
         { name: "age", type: "int", opt: true },
         { name: "aliases", type: "list[str]", opt: true, note: "别名与昵称" },
+        { name: "status_tags", type: "list[str]", opt: true, note: "标签：富商 / 落难 …" },
+      ],
+    },
+    {
+      name: "Identity",
+      desc: "角色的不同身份 / 马甲。区分真身 vs 伪装。",
+      fields: [
+        { name: "identity_name", type: "str", opt: false },
+        { name: "is_real", type: "bool", opt: false, note: "true=真身, false=马甲" },
+      ],
+    },
+    {
+      name: "Family",
+      desc: "家族 / 血缘集团。例如「厉家」。",
+      fields: [
+        { name: "family_name", type: "str", opt: false },
+      ],
+    },
+    {
+      name: "Organization",
+      desc: "公司、机构、帮派、政府部门等组织。",
+      fields: [
+        { name: "org_name", type: "str", opt: false },
+        { name: "org_type", type: "str", opt: true },
+      ],
+    },
+    {
+      name: "Item",
+      desc: "推动剧情的具象道具。例：玉佩、合同。",
+      fields: [
+        { name: "item_name", type: "str", opt: false },
+      ],
+    },
+    {
+      name: "Location",
+      desc: "可命名的地点。区别于 Scene（具体某场戏）。",
+      fields: [
+        { name: "loc_name", type: "str", opt: false },
+      ],
+    },
+    {
+      name: "Misunderstanding",
+      desc: "角色之间的误会节点。",
+      fields: [
+        { name: "summary", type: "str", opt: false },
+        { name: "severity", type: "int", opt: true, note: "1–5 误会程度" },
+      ],
+    },
+    {
+      name: "Secret",
+      desc: "藏在角色之间的关键秘密。",
+      fields: [
+        { name: "secret_content", type: "str", opt: false },
       ],
     },
     {
@@ -118,11 +176,13 @@ export const MOCK_ONTOLOGY_DETAIL: MockOntology = {
   ],
 };
 
+// MOCK_ONTOLOGY_HL must list the same 4 entity types declared in
+// `src/screenplay_memory/ontology_hl/__init__.py:HL_ENTITY_TYPES`.
 export const MOCK_ONTOLOGY_HL: MockOntology = {
   entities: [
     {
       name: "Beat",
-      desc: "叙事节拍，三幕结构中的一个转折点。",
+      desc: "叙事节拍：三幕结构 + 短剧专用节拍。",
       fields: [
         {
           name: "beat_type",
@@ -138,14 +198,38 @@ export const MOCK_ONTOLOGY_HL: MockOntology = {
             "Climax",
             "Resolution",
             "Coda",
+            "CliffHanger",
+            "FacePlay",
+            "Twist",
+            "PayoffMoment",
           ],
           opt: false,
         },
         { name: "tension_level", type: "int", opt: false, note: "1–10 张力值" },
+        { name: "beat_summary", type: "str", opt: true },
       ],
     },
-    { name: "Arc", desc: "人物弧光 / 叙事线。", fields: [] },
-    { name: "Theme", desc: "主题母题。", fields: [{ name: "theme_name", type: "str", opt: false }] },
+    {
+      name: "Arc",
+      desc: "人物弧光 / 叙事线。",
+      fields: [
+        { name: "arc_name", type: "str", opt: false },
+      ],
+    },
+    {
+      name: "Theme",
+      desc: "主题母题。",
+      fields: [
+        { name: "theme_name", type: "str", opt: false },
+      ],
+    },
+    {
+      name: "Trope",
+      desc: "爆款套路标签。例：契约婚、马甲身份、霸总救场。",
+      fields: [
+        { name: "trope_name", type: "str", opt: false },
+      ],
+    },
   ],
   edges: [
     { name: "BeatRelation", desc: "节拍间的时序与归属关系", fields: [] },

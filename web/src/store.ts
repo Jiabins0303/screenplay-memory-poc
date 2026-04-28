@@ -33,6 +33,12 @@ interface UIState {
 
   apiBase: string;
   setApiBase: (url: string) => void;
+
+  // Graph page: when false, drop nodes that carry only Graphiti-generic
+  // labels (Entity / Episodic) so the canvas isn't littered with the
+  // bookkeeping spheres the inspector can't say anything useful about.
+  showInfra: boolean;
+  setShowInfra: (v: boolean) => void;
 }
 
 export const useUI = create<UIState>((set) => ({
@@ -55,5 +61,11 @@ export const useUI = create<UIState>((set) => ({
     const clean = url.replace(/\/$/, "");
     localStorage.setItem("apiBase", clean);
     set({ apiBase: clean });
+  },
+
+  showInfra: localStorage.getItem("showInfra") === "1",
+  setShowInfra: (v) => {
+    localStorage.setItem("showInfra", v ? "1" : "0");
+    set({ showInfra: v });
   },
 }));

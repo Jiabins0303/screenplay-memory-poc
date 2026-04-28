@@ -8,6 +8,8 @@ interface Props {
   hidden: Set<string>;
   onToggle: (label: string) => void;
   onRefresh: () => void;
+  showInfra: boolean;
+  onToggleInfra: () => void;
 }
 
 export default function FilterRail({
@@ -16,6 +18,8 @@ export default function FilterRail({
   hidden,
   onToggle,
   onRefresh,
+  showInfra,
+  onToggleInfra,
 }: Props) {
   // Count nodes per kind label, plus capture an exemplar node so we can
   // ask graphTheme.categoryFor() what color to dot. Keying on the label
@@ -138,6 +142,34 @@ export default function FilterRail({
       </div>
 
       <div style={{ flex: 1 }} />
+
+      <label
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "6px 4px",
+          fontSize: 12,
+          color: "var(--text-dim)",
+          cursor: "pointer",
+          userSelect: "none",
+        }}
+        title="Graphiti 给每个节点都挂一个 Entity / Episodic 标签，没有领域子类型的节点是底层簿记。默认隐藏。"
+      >
+        <input
+          type="checkbox"
+          checked={showInfra}
+          onChange={onToggleInfra}
+          style={{
+            width: 14,
+            height: 14,
+            accentColor: "#74b9ff",
+            cursor: "pointer",
+          }}
+        />
+        基础设施节点
+      </label>
+
       <button
         onClick={onRefresh}
         style={{

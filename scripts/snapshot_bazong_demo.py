@@ -29,6 +29,10 @@ API_BASE = "http://localhost:8000"
 PROJECT_ID = "bazong_demo"
 LAYERS = ("detail", "hl", "bridge")
 
+# Generic Graphiti labels excluded from the per-label tally — they ride
+# on every node and would dominate the "observed types" histogram.
+GENERIC_LABELS = {"Entity", "Episodic"}
+
 # Canvas-ish dimensions used by the React force-graph panel. Multiplying
 # spring_layout's [-1, 1] coords by these gives positions that look good
 # centered on the canvas without further normalization.
@@ -122,6 +126,20 @@ def main() -> None:
         "created_at": project_entry.get("created_at"),
     }
 
+    # Tally non-generic labels per layer so the OntologyEditor's "observed
+    # types" panel can flag schema gaps (label appears in data but not in
+    # the curated MOCK_ONTOLOGY) without re-walking thousands of nodes at
+    # render time.
+    observed: dict[str, dict[str, int]] = {}
+    for layer in LAYERS:
+        tally: dict[str, int] = {}
+        for n in graphs[layer].get("nodes", []):
+            for label in n.get("labels", []):
+                if label in GENERIC_LABELS:
+                    continue
+                tally[label] = tally.get(label, 0) + 1
+        observed[layer] = dict(sorted(tally.items(), key=lambda kv: (-kv[1], kv[0])))
+
     # Embed the data as a JSON.parse() of a single string literal. This sidesteps
     # the as-const narrowing pain on `properties: Record<string, unknown>` —
     # tsc just sees the typed export, and parse happens once at module load.
@@ -129,6 +147,7 @@ def main() -> None:
     graphs_json = json.dumps(graphs, ensure_ascii=False)
     boundary_json = json.dumps(boundary, ensure_ascii=False)
     scenes_json = json.dumps(source_scenes, ensure_ascii=False)
+    observed_json = json.dumps(observed, ensure_ascii=False)
 
     # Escape backticks and ${ for safe template-literal embedding.
     def esc(s: str) -> str:
@@ -179,6 +198,13 @@ export const MOCK_BAZONG_BOUNDARY: BoundarySnapshot = JSON.parse(
 
 export const MOCK_BAZONG_SOURCE_SCENES: SourceScenesPayload = JSON.parse(
   `{esc(scenes_json)}`,
+);
+
+// Per-layer histogram of non-generic node labels actually present in the
+// snapshot. Used by OntologyEditor's "observed types" panel to flag
+// schema gaps (label appears in data but not in MOCK_ONTOLOGY).
+export const BAZONG_OBSERVED_LABELS: Record<"detail" | "hl" | "bridge", Record<string, number>> = JSON.parse(
+  `{esc(observed_json)}`,
 );
 """
 

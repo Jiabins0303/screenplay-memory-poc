@@ -2,17 +2,19 @@ import { useMemo, useState } from "react";
 import { api } from "../api";
 import type { GraphDTO, NodeDTO } from "../types";
 import { KIND_ZH, ROLE_ZH } from "../mockdata";
-import { CATEGORY_COLOR, categoryFor } from "../lib/graphTheme";
+import { CATEGORY_COLOR, categoryFor, nodeLayerKind } from "../lib/graphTheme";
 
 interface Props {
   projectId: string;
   demo: boolean;
   node: NodeDTO;
   graph: GraphDTO;
+  // Optional cross-layer bridge graph. When the selected node is HL,
+  // the inspector resolves "覆盖场景" via Beat→Scene COVERS edges from
+  // this graph instead of the active-layer `graph`.
+  bridgeGraph?: GraphDTO;
   onRefresh: () => void;
   onClose: () => void;
-  // Optional — Graph.tsx wires this in Phase 13. When provided, neighbor chips
-  // become clickable and navigate the inspector to the chosen neighbor.
   onSelectNeighbor?: (uuid: string) => void;
 }
 
@@ -61,10 +63,12 @@ export default function NodeInspector({
   demo,
   node,
   graph,
+  bridgeGraph,
   onRefresh,
   onClose,
   onSelectNeighbor,
 }: Props) {
+  const layerKind = nodeLayerKind(node);
   const [name, setName] = useState(node.name ?? "");
   const [edgeTarget, setEdgeTarget] = useState("");
   const [edgeName, setEdgeName] = useState("");
@@ -179,6 +183,32 @@ export default function NodeInspector({
     return Object.entries(props).filter(([k]) => !isHiddenField(k));
   }, [props]);
 
+  // For HL nodes, resolve covered scenes via Beat→Scene COVERS edges in
+  // the bridge graph. The bridge graph is a separate layer fetch that
+  // Graph.tsx threads in; we tolerate it being missing or empty.
+  const coveredScenes = useMemo<NodeDTO[]>(() => {
+    if (layerKind !== "hl" || !bridgeGraph) return [];
+    if (!node.labels.includes("Beat")) return []; // Theme/Arc/Trope don't COVER scenes
+    const sceneIds = new Set<string>();
+    for (const e of bridgeGraph.edges) {
+      if (e.type !== "COVERS") continue;
+      if (e.source === node.uuid) sceneIds.add(e.target);
+      else if (e.target === node.uuid) sceneIds.add(e.source);
+    }
+    const out: NodeDTO[] = [];
+    for (const id of sceneIds) {
+      const s = bridgeGraph.nodes.find((n) => n.uuid === id);
+      if (s) out.push(s);
+    }
+    return out;
+  }, [layerKind, bridgeGraph, node.uuid, node.labels]);
+
+  // HL-specific surface fields. Empty when not HL.
+  const beatType = layerKind === "hl" ? (props.beat_type as string | undefined) : undefined;
+  const themeName = layerKind === "hl" ? (props.theme_name as string | undefined) : undefined;
+  const arcName = layerKind === "hl" ? (props.arc_name as string | undefined) : undefined;
+  const tropeName = layerKind === "hl" ? (props.trope_name as string | undefined) : undefined;
+
   return (
     <aside
       style={{
@@ -275,18 +305,88 @@ export default function NodeInspector({
         </div>
       )}
 
-      {node.labels.includes("Misunderstanding") && typeof severity === "number" && (
-        <InspectorRow k="严重程度">
-          <Stars value={severity} max={5} />
-        </InspectorRow>
-      )}
-      {node.labels.includes("Beat") && typeof tension === "number" && (
-        <InspectorRow k="张力 (1–10)">
-          <Bar value={tension} max={10} />
-        </InspectorRow>
+      {layerKind === "generic" && (
+        <div
+          style={{
+            padding: "8px 10px",
+            background: "rgba(255,255,255,0.04)",
+            borderLeft: "2px solid var(--border-strong)",
+            borderRadius: 4,
+            fontSize: 12,
+            color: "var(--text-muted)",
+          }}
+        >
+          Graphiti 内部节点 · 不应在故事图谱中出现。
+        </div>
       )}
 
-      {identityNeighbors.length > 0 && (
+      {/* Detail-layer-only display sections. HL nodes (Beat/Arc/Theme/Trope)
+          don't carry severity / Identity neighbors / scene_appearances, so
+          gating these prevents the empty-section noise the user reported. */}
+      {layerKind === "detail" &&
+        node.labels.includes("Misunderstanding") &&
+        typeof severity === "number" && (
+          <InspectorRow k="严重程度">
+            <Stars value={severity} max={5} />
+          </InspectorRow>
+        )}
+
+      {/* HL-specific surface: type chip + tension bar + covered scenes. */}
+      {layerKind === "hl" && (
+        <>
+          {(beatType || themeName || arcName || tropeName) && (
+            <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+              {beatType && (
+                <span className="chip" style={{ borderColor: "rgba(253,203,110,0.55)", color: "#fde7a7" }}>
+                  {beatType}
+                </span>
+              )}
+              {themeName && (
+                <span className="chip" style={{ borderColor: "rgba(162,155,254,0.55)", color: "#dcd8ff" }}>
+                  主题 · {themeName}
+                </span>
+              )}
+              {arcName && (
+                <span className="chip" style={{ borderColor: "rgba(116,185,255,0.55)", color: "#cfe7ff" }}>
+                  弧光 · {arcName}
+                </span>
+              )}
+              {tropeName && (
+                <span className="chip" style={{ borderColor: "rgba(253,203,110,0.55)", color: "#fde7a7" }}>
+                  套路 · {tropeName}
+                </span>
+              )}
+            </div>
+          )}
+          {node.labels.includes("Beat") && typeof tension === "number" && (
+            <InspectorRow k="张力 (1–10)">
+              <Bar value={tension} max={10} />
+            </InspectorRow>
+          )}
+          {coveredScenes.length > 0 && (
+            <div>
+              <div className="tiny muted" style={{ marginBottom: 8 }}>
+                覆盖场景 ({coveredScenes.length})
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {coveredScenes.map((s) => (
+                  <span
+                    key={s.uuid}
+                    className="chip"
+                    style={{ cursor: onSelectNeighbor ? "pointer" : "default" }}
+                    onClick={() => onSelectNeighbor?.(s.uuid)}
+                    title={s.name ?? s.uuid}
+                  >
+                    {sceneTag(s)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {layerKind === "detail" && identityNeighbors.length > 0 && (
         <div>
           <div className="tiny muted" style={{ marginBottom: 8 }}>
             身份 ({identityNeighbors.length})
@@ -332,7 +432,7 @@ export default function NodeInspector({
         </div>
       )}
 
-      {sceneNodes.length > 0 && (
+      {layerKind === "detail" && sceneNodes.length > 0 && (
         <div>
           <div className="tiny muted" style={{ marginBottom: 8 }}>
             出现于 ({sceneNodes.length} 场)

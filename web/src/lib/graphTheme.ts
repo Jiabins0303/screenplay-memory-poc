@@ -47,7 +47,32 @@ const ENTITY_CATEGORY: Record<string, Category> = {
   Item: "knowledge",
 };
 
-const GENERIC_LABELS = new Set(["Entity", "Episodic"]);
+// Generic labels Graphiti always attaches; carry no story meaning. Nodes
+// that have ONLY these labels (no domain subtype) are bookkeeping noise
+// — Graph.tsx drops them from the canvas unless `showInfra` is on.
+export const GENERIC_LABELS = new Set(["Entity", "Episodic"]);
+
+// Subset of labels that belong to the high-level (beat) ontology layer.
+// Used by NodeInspector to switch UI sections and by FilterPanel to
+// understand layer membership without needing to know the API layer
+// param (which the inspector doesn't see).
+export const HL_LABELS = new Set(["Beat", "Arc", "Theme", "Trope"]);
+
+export type LayerKind = "hl" | "detail" | "generic";
+
+// Classify a node into one of the three layer-kinds, regardless of which
+// API layer (detail / hl / bridge) the request came from. A node with
+// any HL label is "hl"; otherwise any non-generic label makes it
+// "detail"; only-generic-labels nodes are "generic" infrastructure.
+export function nodeLayerKind(node: Pick<NodeDTO, "labels">): LayerKind {
+  for (const l of node.labels) {
+    if (HL_LABELS.has(l)) return "hl";
+  }
+  for (const l of node.labels) {
+    if (!GENERIC_LABELS.has(l)) return "detail";
+  }
+  return "generic";
+}
 
 export function categoryFor(node: Pick<NodeDTO, "labels">): Category {
   for (const label of node.labels) {
