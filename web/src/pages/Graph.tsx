@@ -20,22 +20,96 @@ import NodeInspector from "../components/NodeInspector";
 import EdgeInspector from "../components/EdgeInspector";
 import { GENERIC_LABELS } from "../lib/graphTheme";
 
+// Synthetic edges projected from hidden infrastructure nodes carry this
+// type so ForceGraphPanel can render them with a subdued style and the
+// inspector knows there is no real backend uuid to select.
+export const CO_OCCURRENCE_EDGE_TYPE = "_co_occurrence";
+
+// Labels the bridge layer should not render. The bridge view is meant to
+// surface Beat→Scene COVERS edges; Theme / Trope / Arc come back from
+// the API because they're HL labels but they never participate in
+// COVERS, so they always float as orphan stars unless we drop them.
+const BRIDGE_NODE_BLOCK = new Set(["Theme", "Trope", "Arc"]);
+
 function filterGraph(
   graph: GraphDTO,
   hidden: Set<string>,
   showInfra: boolean,
+  layer: Layer,
 ): GraphDTO {
+  // Mark which nodes would be dropped by the infra rule. We need to know
+  // these later so we can synthesize co-occurrence edges between the
+  // entities that an Episodic node MENTIONS — without that projection,
+  // hiding Episodic strands every leaf entity into the void.
+  const hiddenInfraIds = new Set<string>();
+  if (!showInfra) {
+    for (const n of graph.nodes) {
+      if (n.labels.every((l) => GENERIC_LABELS.has(l))) {
+        hiddenInfraIds.add(n.uuid);
+      }
+    }
+  }
+
   const visible = graph.nodes.filter((n) => {
-    // Drop Graphiti-bookkeeping nodes (Entity / Episodic only) when the
-    // infrastructure toggle is off.
-    if (!showInfra && n.labels.every((l) => GENERIC_LABELS.has(l))) return false;
+    if (hiddenInfraIds.has(n.uuid)) return false;
+    if (layer === "bridge" && n.labels.some((l) => BRIDGE_NODE_BLOCK.has(l))) return false;
     return n.labels.every((l) => !hidden.has(l));
   });
   const ids = new Set(visible.map((n) => n.uuid));
-  return {
-    nodes: visible,
-    edges: graph.edges.filter((e) => ids.has(e.source) && ids.has(e.target)),
-  };
+  const edges = graph.edges.filter((e) => ids.has(e.source) && ids.has(e.target));
+
+  // Project co-occurrence: for every hidden infrastructure node, gather
+  // its visible entity neighbors and emit pairwise links between them.
+  // Skip pairs that already have a real edge so we don't double-stroke.
+  if (hiddenInfraIds.size > 0) {
+    const realPairs = new Set<string>();
+    for (const e of edges) {
+      const a = e.source;
+      const b = e.target;
+      realPairs.add(a < b ? `${a}|${b}` : `${b}|${a}`);
+    }
+    const infraNeighbors = new Map<string, Set<string>>();
+    for (const e of graph.edges) {
+      let infraId: string | null = null;
+      let entityId: string | null = null;
+      if (hiddenInfraIds.has(e.source) && ids.has(e.target)) {
+        infraId = e.source;
+        entityId = e.target;
+      } else if (hiddenInfraIds.has(e.target) && ids.has(e.source)) {
+        infraId = e.target;
+        entityId = e.source;
+      }
+      if (!infraId || !entityId) continue;
+      if (!infraNeighbors.has(infraId)) infraNeighbors.set(infraId, new Set());
+      infraNeighbors.get(infraId)!.add(entityId);
+    }
+    const emitted = new Set<string>();
+    for (const [, neighbors] of infraNeighbors) {
+      const arr = Array.from(neighbors);
+      // Cap per-infra fanout. A scene that mentions 20 entities would
+      // emit 190 pairwise links; visually that's noise, not signal.
+      if (arr.length > 12) continue;
+      for (let i = 0; i < arr.length; i++) {
+        for (let j = i + 1; j < arr.length; j++) {
+          const a = arr[i];
+          const b = arr[j];
+          const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+          if (emitted.has(key)) continue;
+          if (realPairs.has(key)) continue;
+          emitted.add(key);
+          edges.push({
+            uuid: null,
+            source: a,
+            target: b,
+            type: CO_OCCURRENCE_EDGE_TYPE,
+            properties: {},
+          });
+        }
+      }
+    }
+  }
+
+  return { nodes: visible, edges };
 }
 
 const LAYER_TITLE: Record<Layer, string> = {
@@ -113,8 +187,8 @@ export default function GraphPage() {
   }, [layer]);
 
   const filtered = useMemo(
-    () => filterGraph(graph, hidden, showInfra),
-    [graph, hidden, showInfra],
+    () => filterGraph(graph, hidden, showInfra, layer),
+    [graph, hidden, showInfra, layer],
   );
 
   const selectedNode: NodeDTO | null = useMemo(() => {

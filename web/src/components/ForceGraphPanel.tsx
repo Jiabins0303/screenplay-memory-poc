@@ -191,17 +191,33 @@ export default function ForceGraphPanel({
           nodeOpacity={0.92}
           nodeLabel={(n: NodeObj) => n.name}
           linkColor={(l: LinkObj) => {
-            if (!selectedUuid) return LINK.color;
+            const synthetic = l.type === "_co_occurrence";
+            if (!selectedUuid) {
+              return synthetic ? "rgba(180,200,255,0.10)" : LINK.color;
+            }
             const a = endpointId(l.source);
             const b = endpointId(l.target);
             const touchesSel = a === selectedUuid || b === selectedUuid;
+            if (synthetic) {
+              return touchesSel
+                ? "rgba(180,200,255,0.35)"
+                : "rgba(180,200,255,0.04)";
+            }
             return touchesSel ? "rgba(180,200,255,0.85)" : "rgba(180,200,255,0.08)";
           }}
-          linkWidth={(l: LinkObj) =>
-            l.uuid && l.uuid === selectedEdgeUuid ? 3 : LINK.width
-          }
+          linkWidth={(l: LinkObj) => {
+            if (l.uuid && l.uuid === selectedEdgeUuid) return 3;
+            if (l.type === "_co_occurrence") return 0.5;
+            return LINK.width;
+          }}
           linkOpacity={LINK.opacity}
-          linkDirectionalParticles={LINK.particles}
+          // Particles only on real edges. Synthetic co-occurrence links
+          // are decorative connective tissue — adding particles to them
+          // would compete with the real ScreenplayRelation/KnowsSecret
+          // edges for attention.
+          linkDirectionalParticles={(l: LinkObj) =>
+            l.type === "_co_occurrence" ? 0 : LINK.particles
+          }
           linkDirectionalParticleWidth={LINK.particleWidth}
           linkDirectionalParticleSpeed={LINK.particleSpeed}
           linkDirectionalParticleColor={() => LINK.particleColor}
