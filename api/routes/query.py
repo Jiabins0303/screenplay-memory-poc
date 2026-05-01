@@ -66,7 +66,12 @@ async def query(
 
 
 def _iso(v):
+    if not v:
+        return None
     try:
-        return v.isoformat() if v else None
-    except Exception:
+        return v.isoformat()
+    except (AttributeError, TypeError):
+        # Driver-side coercion can return strings or other shapes that
+        # don't expose isoformat(); fall back to None so JSON encoding
+        # still succeeds.
         return None

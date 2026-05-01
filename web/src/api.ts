@@ -29,7 +29,11 @@ export function apiBase(): string {
 }
 
 export function setApiBase(url: string): void {
-  localStorage.setItem("apiBase", url.replace(/\/$/, ""));
+  try {
+    localStorage.setItem("apiBase", url.replace(/\/$/, ""));
+  } catch {
+    // ignore storage access errors (private mode, quota exceeded, etc.)
+  }
 }
 
 // Return mock data for known GET paths in DEMO_ONLY mode. Returns ``null``

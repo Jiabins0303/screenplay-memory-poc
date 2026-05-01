@@ -31,7 +31,14 @@ async def lifespan(app: FastAPI):
 
 def _allowed_origins() -> list[str]:
     raw = os.getenv("API_ALLOWED_ORIGINS", "*")
-    return [o.strip() for o in raw.split(",") if o.strip()]
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    # Refuse to start in prod with a wildcard origin. dev/local is fine.
+    if os.getenv("ENV", "").lower() == "prod" and "*" in origins:
+        raise RuntimeError(
+            "API_ALLOWED_ORIGINS='*' is not allowed when ENV=prod. "
+            "Set it to a comma-separated list of allowed origins."
+        )
+    return origins
 
 
 app = FastAPI(title="screenplay-memory API", lifespan=lifespan)

@@ -733,9 +733,3 @@ function pickEntities(scene: SceneRow): { kind: string; name: string }[] {
   return out;
 }
 
-if (typeof document !== "undefined" && !document.getElementById("ingest-kf")) {
-  const s = document.createElement("style");
-  s.id = "ingest-kf";
-  s.textContent = `@keyframes ingest-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }`;
-  document.head.appendChild(s);
-}

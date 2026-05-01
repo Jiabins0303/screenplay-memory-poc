@@ -22,6 +22,7 @@ class Settings:
     chat_small_model: str
     embedding_model: str
     embedding_dim: int
+    llm_max_tokens: int
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -47,6 +48,18 @@ class Settings:
             raise RuntimeError(
                 f"Missing required env vars: {missing}. Copy .env.example to .env."
             )
+        try:
+            embedding_dim = int(required["EMBEDDING_DIM"])
+        except ValueError as e:
+            raise RuntimeError(
+                f"EMBEDDING_DIM must be an integer, got {required['EMBEDDING_DIM']!r}"
+            ) from e
+        try:
+            llm_max_tokens = int(os.getenv("LLM_MAX_TOKENS", "5000"))
+        except ValueError as e:
+            raise RuntimeError(
+                f"LLM_MAX_TOKENS must be an integer, got {os.getenv('LLM_MAX_TOKENS')!r}"
+            ) from e
         return cls(
             neo4j_uri=required["NEO4J_URI"],
             neo4j_user=required["NEO4J_USER"],
@@ -56,5 +69,6 @@ class Settings:
             chat_model=required["CHAT_MODEL"],
             chat_small_model=required["CHAT_SMALL_MODEL"],
             embedding_model=required["EMBEDDING_MODEL"],
-            embedding_dim=int(required["EMBEDDING_DIM"]),
+            embedding_dim=embedding_dim,
+            llm_max_tokens=llm_max_tokens,
         )

@@ -44,12 +44,12 @@ class OntologyFieldSpec(BaseModel):
 class OntologyEntitySpec(BaseModel):
     name: str
     description: str = ""
-    fields: list[OntologyFieldSpec] = []
+    fields: list[OntologyFieldSpec] = Field(default_factory=list)
 
 
 class OntologySpec(BaseModel):
-    entities: list[OntologyEntitySpec] = []
-    edges: list[OntologyEntitySpec] = []
+    entities: list[OntologyEntitySpec] = Field(default_factory=list)
+    edges: list[OntologyEntitySpec] = Field(default_factory=list)
 
 
 # --- Ingest ----------------------------------------------------------------
@@ -83,8 +83,8 @@ class IngestRequest(BaseModel):
 class NodeDTO(BaseModel):
     uuid: str
     name: str | None = None
-    labels: list[str] = []
-    properties: dict = {}
+    labels: list[str] = Field(default_factory=list)
+    properties: dict = Field(default_factory=dict)
 
 
 class EdgeDTO(BaseModel):
@@ -92,7 +92,7 @@ class EdgeDTO(BaseModel):
     source: str
     target: str
     type: str
-    properties: dict = {}
+    properties: dict = Field(default_factory=dict)
 
 
 class GraphDTO(BaseModel):

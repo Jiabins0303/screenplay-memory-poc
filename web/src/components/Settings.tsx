@@ -99,10 +99,15 @@ export default function Settings({ open, onClose }: Props) {
         </header>
 
         <div style={{ padding: "20px 26px", flex: 1, overflow: "auto" }}>
-          <label className="kicker" style={{ display: "block", marginBottom: 8 }}>
+          <label
+            className="kicker"
+            htmlFor="settings-api-base"
+            style={{ display: "block", marginBottom: 8 }}
+          >
             API 地址
           </label>
           <input
+            id="settings-api-base"
             className="input mono"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}

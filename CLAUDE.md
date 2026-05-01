@@ -15,8 +15,9 @@ Authoritative deep docs: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`README.md`](REA
 docker compose up -d
 docker compose down -v   # destroys the volume — required when EMBEDDING_DIM changes
 
-# Install (editable) + dev deps
+# Install (editable) + dev deps; add ',api' when running the FastAPI server
 pip install -e ".[dev]"
+pip install -e ".[dev,api]"   # also pulls fastapi, uvicorn, sse-starlette
 
 # Run a single stage
 pytest tests/test_01_baseline.py -v       # Stage 1: bare Graphiti + Chinese
@@ -28,6 +29,12 @@ pytest tests/test_03_query.py::test_query_zhang_wei_knows_after_revelation -v
 
 # Lint
 ruff check src tests
+
+# Web (in web/, pnpm only — npm/yarn lockfiles will drift)
+pnpm dev                # vite dev server, proxies to API_BASE in localStorage
+pnpm typecheck          # tsc -b --noEmit
+pnpm build              # full build → web/dist/
+pnpm build:demo         # VITE_DEMO_ONLY=true, used by Cloudflare Pages / GH Pages
 ```
 
 `pytest.ini_options.asyncio_mode = "auto"` is set — do not add `@pytest.mark.asyncio`; fixtures are already async-aware via `tests/conftest.py`.
@@ -49,7 +56,7 @@ MATCH (n) WHERE n.group_id='test_project' RETURN n LIMIT 50
 
 Stage 3 query (`query_character_knowledge` in `queries/cognitive.py`): hybrid `graphiti.search` → filter by `valid_at < cutoff` and (`invalid_at is None` or `invalid_at > cutoff`) → reverse-lookup counterpart nodes via `source_node_uuid` / `target_node_uuid`. `valid_at = None` edges are kept (LLM rarely extracts explicit time words from screenplays); the synthetic per-scene `reference_time` carries ordering instead.
 
-Package layout (`src/screenplay_memory/`): `config.py` (frozen `Settings` dataclass, only place that reads env), `client.py` (facade), `ontology/` (Pydantic entity + edge schemas — docstrings ARE the prompt), `chinese/` (`prompts.py` constants + `coreference.py` pure function), `queries/cognitive.py`, `annotations.py` (witness-scope tagging used during ingest).
+Package layout (`src/screenplay_memory/`): `config.py` (frozen `Settings` dataclass, only place that reads env), `client.py` (facade), `llm_client.py` (`SmartModelClient` — subclasses `OpenAIGenericClient` to actually honour `CHAT_SMALL_MODEL`; graphiti-core 0.28.x ignores `small_model` and always uses the big one, this is the fix), `ontology/` (Pydantic entity + edge schemas — docstrings ARE the prompt), `chinese/` (`prompts.py` constants + `coreference.py` pure function), `queries/cognitive.py`, `queries/scene_index.py` (post-ingest annotator that writes `scene_appearances` / `quotes` onto entity nodes — see Stage 7 below), `annotations.py` (witness-scope tagging used during ingest).
 
 ### Non-obvious rules that bite if ignored
 
@@ -77,7 +84,9 @@ Two Graphiti layers now share one Neo4j database:
 
 **FastAPI layer** (`api/`): `uvicorn api.main:app --port 8000`. Endpoints under `/projects/{pid}` mirror the backend modules. SSE ingest progress via `sse-starlette`. `docker compose up` starts Neo4j + the API together. CORS origins are read from `API_ALLOWED_ORIGINS` (default `*` in dev).
 
-**Frontend** (`web/`): Vite + React 18 + TypeScript + Tailwind + pnpm. 3D graph via `3d-force-graph` (vanilla, wrapped in a React ref; the TS def exports a class, but the actual factory is curry — cast through `unknown` to call it). Backend URL configurable per-user via the settings modal (localStorage `apiBase`). Build: `pnpm build` → `web/dist/` for Cloudflare Pages deploy.
+**Frontend** (`web/`): Vite + React 18 + TypeScript + Tailwind + pnpm. 3D graph via `react-force-graph-3d` (vanilla `3d-force-graph` is also accessible; the TS def exports a class, but the actual factory is curry — cast through `unknown` to call it). Backend URL configurable per-user via the settings modal (localStorage `apiBase`). Build: `pnpm build` → `web/dist/`. Static demo build (`pnpm build:demo`, sets `VITE_DEMO_ONLY=true`) is what GH Pages / Cloudflare Pages deploy — it bakes a snapshot of the bazong demo and disables write endpoints in the UI.
+
+**Demo CLI** (`scripts/demo.py`): driver for the bazong "memory layer vs bare LLM" pitch. Three acts — `ask` (cognitive boundary), `who-all` (multi-character side-by-side), `beats` / `tropes` (HL layer stats). Each act takes `--memory` or `--no-memory`. `--replay` reads `scripts/demo_cache.json` to play a recorded run (network flake / rehearsal fallback); `--record` writes the cache after a live run. Snapshot the graph with `scripts/snapshot_bazong_demo.py` and rebuild the scene index with `scripts/build_scene_index.py --project-id bazong_demo [--layer hl]` whenever the project is reingested.
 
 ### Tests added
 
@@ -85,6 +94,8 @@ Two Graphiti layers now share one Neo4j database:
 - `tests/test_05_customization.py` — spec_to_pydantic + Neo4j save/load
 - `tests/test_05_edits.py` — rename / merge / delete / add_edge round-trips
 - `tests/test_06_api.py` — FastAPI TestClient coverage for every non-LLM endpoint
+- `tests/test_07_scene_index.py` — `build_scene_index` post-step (pure Cypher, no LLM); writes `scene_appearances` / `quotes` properties onto entity nodes after a hand-built minimal graph
+- `tests/test_llm_client.py` — `SmartModelClient` small-vs-big routing + token tracking
 
 ### Known non-obvious pitfalls from this build
 

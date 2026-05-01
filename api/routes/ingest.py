@@ -12,6 +12,7 @@ unless ``force=true``.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from pathlib import Path
 from typing import AsyncIterator
@@ -23,6 +24,7 @@ from api.models import IngestRequest
 from api.sse import json_sse
 from screenplay_memory.annotations_hl import attach_beats_to_scenes
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects/{project_id}/ingest", tags=["ingest"])
 
 _MAX_CONCURRENT = 2
@@ -179,8 +181,11 @@ async def ingest(
                 "output_tokens": total.output_tokens,
             }
             client._graphiti.token_tracker.reset()
-        except Exception:
-            pass
+        except AttributeError:
+            # token_tracker is optional — older Graphiti builds may not
+            # expose get_total_usage()/reset(). Surface nothing in that
+            # case rather than failing the whole stream.
+            logger.debug("token_tracker not available; skipping totals", exc_info=True)
         yield {"event": "done", "data": token_data}
 
     return json_sse(stream())

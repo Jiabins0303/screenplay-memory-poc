@@ -426,6 +426,11 @@ kbd {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }
 }
+
+@keyframes ingest-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
 .stagger-in > * {
   opacity: 0;
   animation: fade-rise 0.24s ease-out forwards;

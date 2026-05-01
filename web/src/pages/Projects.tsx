@@ -179,7 +179,11 @@ export default function ProjectsPage() {
             value={newTitle}
             autoFocus
             onChange={(e) => setNewTitle(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && create()}
+            onKeyDown={(e) => {
+              // Skip IME composition (Chinese pinyin selection commits via Enter).
+              if (e.nativeEvent.isComposing) return;
+              if (e.key === "Enter") create();
+            }}
           />
           <div
             className="row"

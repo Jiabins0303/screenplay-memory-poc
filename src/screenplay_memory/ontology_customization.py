@@ -35,6 +35,7 @@ import json
 from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, Field, create_model
+from pydantic_core import PydanticUndefined
 
 # --- Type whitelist --------------------------------------------------------
 # Any type token outside this map is rejected. Keep the set small; expand
@@ -309,15 +310,15 @@ def _dump_type(ann: Any) -> Any:
             origin = getattr(ann, "__origin__", None)
             if origin is Literal or str(ann).startswith("typing.Literal"):
                 return {"kind": "literal", "values": list(args)}
-    except Exception:
+    except (TypeError, AttributeError):
+        # Annotation isn't a typing form we can introspect — fall through
+        # to the generic "str" fallback below so the UI still renders.
         pass
     return "str"  # graceful fallback so the UI still renders
 
 
 def _is_unset(value: Any) -> bool:
-    # Pydantic v2 marks "no default" as PydanticUndefined; detect by repr
-    # to avoid importing private modules.
-    return repr(value) == "PydanticUndefined"
+    return value is PydanticUndefined
 
 
 def _is_jsonable(value: Any) -> bool:

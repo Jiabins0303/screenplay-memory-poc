@@ -13,7 +13,7 @@
 // so Graph.tsx call site keeps compiling. `inkStyle` is accepted but ignored.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import ForceGraph3D from "react-force-graph-3d";
+import ForceGraph3D, { type ForceGraphMethods } from "react-force-graph-3d";
 import type { EdgeDTO, NodeDTO } from "../types";
 import {
   CATEGORY_COLOR,
@@ -78,10 +78,7 @@ export default function ForceGraphPanel({
   onSelectEdge,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
-  // ForceGraph3D ref is generic over node/link shapes; we only need
-  // refresh() so a permissive ref type keeps the call site readable.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fgRef = useRef<any>(null);
+  const fgRef = useRef<ForceGraphMethods<NodeObj, LinkObj> | undefined>(undefined);
   const [size, setSize] = useState({ w: 0, h: 0 });
 
   // Container resize → ForceGraph3D width/height props. We can't let the

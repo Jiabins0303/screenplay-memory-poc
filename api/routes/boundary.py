@@ -32,7 +32,6 @@ matrix UI:
 from __future__ import annotations
 
 import logging
-import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -40,6 +39,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from api.deps import ClientCache, get_cache, get_client
 from screenplay_memory.queries.cognitive import _is_within_cutoff
+from screenplay_memory.scene_ref import parse_scene_ref
 
 router = APIRouter(prefix="/projects/{project_id}/boundary", tags=["boundary"])
 logger = logging.getLogger(__name__)
@@ -60,27 +60,6 @@ def _cutoff(ep: int, sc: int) -> datetime:
     # scene immediately after the beat's range end so edges created at
     # that scene are included.
     return _BASE_EPOCH + timedelta(seconds=ep * 10000 + (sc + 1) * 100)
-
-
-_CHINESE_SCENE_RE = re.compile(r"第(\d+)集第(\d+)场")
-
-
-def _parse_scene_ref(ref: str | None) -> tuple[int, int] | None:
-    if not ref:
-        return None
-    ref = ref.strip()
-    parts = ref.split("-")
-    if len(parts) == 2:
-        try:
-            ep, sc = int(parts[0]), int(parts[1])
-            if ep >= 0 and sc >= 0:
-                return ep, sc
-        except ValueError:
-            pass
-    m = _CHINESE_SCENE_RE.search(ref)
-    if m:
-        return int(m.group(1)), int(m.group(2))
-    return None
 
 
 async def _character_edges(graphiti: Any, project_id: str, character_name: str) -> list[Any]:
@@ -148,7 +127,7 @@ async def get_boundary(
 
     beats = []
     for b in raw:
-        parsed = _parse_scene_ref(b.get("range_end"))
+        parsed = parse_scene_ref(b.get("range_end"))
         if parsed is None:
             continue
         ep, sc = parsed
@@ -225,9 +204,9 @@ async def get_boundary(
 
         try:
             edges = await _character_edges(graphiti, project_id, char_name)
-        except Exception as exc:
+        except Exception:
             # One character's search failure shouldn't nuke the matrix.
-            logger.warning("boundary: search failed for %s: %s", char_name, exc)
+            logger.exception("boundary: search failed for %s", char_name)
             for b in beats:
                 knowledge[c["uuid"]][b["uuid"]] = []
             continue

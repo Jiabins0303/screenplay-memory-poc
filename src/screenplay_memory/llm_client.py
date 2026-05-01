@@ -93,6 +93,6 @@ class SmartModelClient(OpenAIGenericClient):
             return json.loads(result)
         except openai.RateLimitError as e:
             raise RateLimitError from e
-        except Exception as e:
-            logger.error(f"Error in generating LLM response: {e}")
+        except Exception:
+            logger.exception("Error in generating LLM response")
             raise

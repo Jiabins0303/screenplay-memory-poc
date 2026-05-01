@@ -210,7 +210,11 @@ export default function ChatPopover() {
             value={input}
             placeholder="问一个关于这部剧的问题…"
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && ask(input)}
+            onKeyDown={(e) => {
+              // Skip IME composition (Chinese pinyin selection commits via Enter).
+              if (e.nativeEvent.isComposing) return;
+              if (e.key === "Enter") ask(input);
+            }}
           />
           <button
             className="btn primary"

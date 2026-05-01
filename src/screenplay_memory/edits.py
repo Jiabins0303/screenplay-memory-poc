@@ -10,7 +10,7 @@ never trust Neo4j's internal id() since it is not stable across restarts.
 
 from __future__ import annotations
 
-import uuid as _uuid
+import uuid
 from typing import Any
 
 
@@ -161,7 +161,7 @@ async def add_edge(
     relationship types, so the relation label is fixed — the ``name`` field
     stores the semantic verb (e.g. "认识", "告诉").
     """
-    edge_uuid = str(_uuid.uuid4())
+    edge_uuid = str(uuid.uuid4())
     async with graphiti.driver.session() as sess:
         result = await sess.run(
             """

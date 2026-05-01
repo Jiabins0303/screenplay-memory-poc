@@ -9,6 +9,26 @@ import { DEMO_ONLY } from "./env";
 
 export type Route = "projects" | "ontology" | "ingest" | "graph" | "boundary";
 
+const VALID_ROUTES: readonly Route[] = [
+  "projects",
+  "ontology",
+  "ingest",
+  "graph",
+  "boundary",
+];
+
+function loadRoute(): Route {
+  try {
+    const stored = localStorage.getItem("route");
+    if (stored && (VALID_ROUTES as readonly string[]).includes(stored)) {
+      return stored as Route;
+    }
+  } catch {
+    // ignore storage access errors
+  }
+  return "projects";
+}
+
 export interface ActiveProject {
   id: string;
   title: string;
@@ -42,7 +62,7 @@ interface UIState {
 }
 
 export const useUI = create<UIState>((set) => ({
-  route: (localStorage.getItem("route") as Route) || "projects",
+  route: loadRoute(),
   setRoute: (r) => {
     localStorage.setItem("route", r);
     set({ route: r });

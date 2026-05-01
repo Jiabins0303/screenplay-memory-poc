@@ -10,7 +10,6 @@ Stage 1 was a bare baseline. Stage 2 layers on:
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
@@ -149,7 +148,7 @@ class MemoryClient:
             base_url=s.openrouter_api_base,
             temperature=0.2,
         )
-        # max_tokens trade-off:
+        # max_tokens trade-off (see config.py for env handling):
         # - Too high → OpenRouter 402 when the key's per-request credit
         #   budget is smaller than the reservation (fixable by raising
         #   the key's credit limit at openrouter.ai/settings/keys).
@@ -157,8 +156,7 @@ class MemoryClient:
         #   emits malformed output that blows up Neo4j's codec.
         # 5000 is the empirical floor that still fits the extraction JSON;
         # bump to 8192 via LLM_MAX_TOKENS=8192 once the key has headroom.
-        max_tokens = int(os.getenv("LLM_MAX_TOKENS", "5000"))
-        llm_client = SmartModelClient(config=llm_config, max_tokens=max_tokens)
+        llm_client = SmartModelClient(config=llm_config, max_tokens=s.llm_max_tokens)
         embedder = OpenAIEmbedder(
             config=OpenAIEmbedderConfig(
                 api_key=s.openrouter_api_key,
@@ -376,7 +374,13 @@ class MemoryClient:
                 """,
                 gid=hl_gid,
             )
-            return [dict(row["b"]) async for row in result]
+            # Drop the embedding vector — it bloats every JSON payload
+            # to multi-megabyte for no UI use. Mirrors graph.py's
+            # _sanitize_props.
+            return [
+                {k: v for k, v in dict(row["b"]).items() if k != "name_embedding"}
+                async for row in result
+            ]
 
     async def query_cognitive(
         self,
